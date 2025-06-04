@@ -16,12 +16,14 @@ os.makedirs('docs/images', exist_ok=True)
 # Cargar un modelo pre-entrenado
 model = tf.keras.applications.VGG16(weights='imagenet')
 
-# Cargar una imagen de ejemplo
-img_path = tf.keras.utils.get_file(
-    'elephant.jpg',
-    'https://storage.googleapis.com/download.tensorflow.org/example_images/elephant.jpg')
-img = tf.keras.preprocessing.image.load_img(img_path, target_size=(224, 224))
-img_array = tf.keras.preprocessing.image.img_to_array(img)
+# Crear directorio para imágenes si no existe
+os.makedirs('docs/images', exist_ok=True)
+
+# Usar una imagen local en lugar de descargarla
+# Crear una imagen de prueba simple
+img_array = np.random.random((224, 224, 3))
+img_array = (img_array * 255).astype(np.uint8)
+img = Image.fromarray(img_array)
 img_array = np.expand_dims(img_array, axis=0)
 img_array = tf.keras.applications.vgg16.preprocess_input(img_array)
 

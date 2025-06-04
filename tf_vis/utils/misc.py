@@ -82,9 +82,30 @@ def load_model(model_name: str, weights: str = 'imagenet',
             include_top=include_top
         )
     else:
-        model = model_info['module'].Model(
+        # Usar la función correcta para cargar el modelo
+        model = model_info['module'].VGG16(
             weights=weights,
             include_top=include_top
+        ) if model_name.lower() == 'vgg16' else (
+            model_info['module'].VGG19(
+                weights=weights,
+                include_top=include_top
+            ) if model_name.lower() == 'vgg19' else (
+                model_info['module'].ResNet50(
+                    weights=weights,
+                    include_top=include_top
+                ) if model_name.lower() == 'resnet50' else (
+                    model_info['module'].InceptionV3(
+                        weights=weights,
+                        include_top=include_top
+                    ) if model_name.lower() == 'inception_v3' else (
+                        model_info['module'].MobileNet(
+                            weights=weights,
+                            include_top=include_top
+                        )
+                    )
+                )
+            )
         )
     
     return model
