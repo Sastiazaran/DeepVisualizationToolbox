@@ -173,9 +173,10 @@ class ModelWrapper:
         """
         if layer_name is not None:
             layer = self.model.get_layer(layer_name)
-            # Manejar caso especial para InputLayer que no tiene output_shape directamente
+            # Manejar caso especial para InputLayer
             if isinstance(layer, tf.keras.layers.InputLayer):
-                shape = layer.input_shape
+                # Para InputLayer, usamos batch_input_shape que siempre está disponible
+                shape = layer.batch_input_shape
             else:
                 shape = layer.output_shape
                 
@@ -188,9 +189,10 @@ class ModelWrapper:
         else:
             result = {}
             for layer in self.model.layers:
-                # Manejar caso especial para InputLayer que no tiene output_shape directamente
+                # Manejar caso especial para InputLayer
                 if isinstance(layer, tf.keras.layers.InputLayer):
-                    shape = layer.input_shape
+                    # Para InputLayer, usamos batch_input_shape que siempre está disponible
+                    shape = layer.batch_input_shape
                 else:
                     shape = layer.output_shape
                     
