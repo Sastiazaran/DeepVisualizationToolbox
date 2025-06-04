@@ -70,13 +70,43 @@ def main():
         available_models = get_available_models()
         preprocess_fn = available_models[args.model.lower()]['preprocess']
         
+        # Modificar la fuente de entrada si se especificó webcam pero no hay acceso
+        input_source = args.input_source
+        if input_source == 'webcam':
+            # Verificar si podemos acceder a la webcam
+            try:
+                cap = cv2.VideoCapture(0)
+                if not cap.isOpened():
+                    print("No se pudo acceder a la webcam, usando imágenes de prueba")
+                    # Crear directorio temporal para imágenes de prueba si no existe
+                    if not os.path.exists('input_images'):
+                        os.makedirs('input_images')
+                    # Crear algunas imágenes de prueba
+                    for i in range(5):
+                        img = np.random.random((args.input_size[1], args.input_size[0], 3))
+                        img = (img * 255).astype(np.uint8)
+                        cv2.imwrite(f'input_images/test_{i}.jpg', img)
+                    input_source = 'directory:input_images'
+                cap.release()
+            except Exception as e:
+                print(f"Error al verificar webcam: {e}, usando imágenes de prueba")
+                # Crear directorio temporal para imágenes de prueba si no existe
+                if not os.path.exists('input_images'):
+                    os.makedirs('input_images')
+                # Crear algunas imágenes de prueba
+                for i in range(5):
+                    img = np.random.random((args.input_size[1], args.input_size[0], 3))
+                    img = (img * 255).astype(np.uint8)
+                    cv2.imwrite(f'input_images/test_{i}.jpg', img)
+                input_source = 'directory:input_images'
+        
         # Crear fetcher
         input_fetcher = InputFetcher(
-            input_source=args.input_source,
+            input_source=input_source,
             preprocessing_function=preprocess_fn,
             target_size=tuple(args.input_size)
         )
-        print(f"Fuente de entrada configurada: {args.input_source}")
+        print(f"Fuente de entrada configurada: {input_source}")
     except Exception as e:
         print(f"Error al configurar la fuente de entrada: {e}")
         sys.exit(1)

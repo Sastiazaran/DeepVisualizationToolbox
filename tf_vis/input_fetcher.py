@@ -58,9 +58,22 @@ class InputFetcher:
     
     def _initialize_webcam(self, device_id: int = 0):
         """Inicializa la webcam."""
-        self.webcam = cv2.VideoCapture(device_id)
-        if not self.webcam.isOpened():
-            raise ValueError(f"No se pudo abrir la webcam con ID {device_id}")
+        try:
+            self.webcam = cv2.VideoCapture(device_id)
+            if not self.webcam.isOpened():
+                print(f"Advertencia: No se pudo abrir la webcam con ID {device_id}")
+                # Crear una imagen de prueba en lugar de usar la webcam
+                self.use_test_image = True
+                self.test_image = np.random.random((self.target_size[1], self.target_size[0], 3))
+                self.test_image = (self.test_image * 255).astype(np.uint8)
+            else:
+                self.use_test_image = False
+        except Exception as e:
+            print(f"Error al inicializar webcam: {e}")
+            # Crear una imagen de prueba en lugar de usar la webcam
+            self.use_test_image = True
+            self.test_image = np.random.random((self.target_size[1], self.target_size[0], 3))
+            self.test_image = (self.test_image * 255).astype(np.uint8)
     
     def _load_directory(self, directory: str):
         """Carga imágenes desde un directorio."""
@@ -138,16 +151,30 @@ class InputFetcher:
             raise ValueError(f"Fuente de entrada no válida: {self.input_source}")
     
     def _get_webcam_frame(self) -> np.ndarray:
-        """Captura y devuelve un frame de la webcam."""
-        ret, frame = self.webcam.read()
-        if not ret:
-            raise RuntimeError("No se pudo capturar frame de la webcam")
-        
-        # Convertir de BGR a RGB
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Redimensionar
-        frame = cv2.resize(frame, self.target_size)
+        """Captura y devuelve un frame de la webcam o una imagen de prueba."""
+        if hasattr(self, 'use_test_image') and self.use_test_image:
+            # Devolver imagen de prueba si la webcam no está disponible
+            frame = self.test_image.copy()
+        else:
+            # Intentar capturar frame de la webcam
+            try:
+                ret, frame = self.webcam.read()
+                if not ret:
+                    print("No se pudo capturar frame de la webcam, usando imagen de prueba")
+                    # Crear una imagen de prueba
+                    frame = np.random.random((self.target_size[1], self.target_size[0], 3))
+                    frame = (frame * 255).astype(np.uint8)
+                else:
+                    # Convertir de BGR a RGB
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
+                    # Redimensionar
+                    frame = cv2.resize(frame, self.target_size)
+            except Exception as e:
+                print(f"Error al capturar frame: {e}")
+                # Crear una imagen de prueba
+                frame = np.random.random((self.target_size[1], self.target_size[0], 3))
+                frame = (frame * 255).astype(np.uint8)
         
         # Aplicar preprocesamiento si está definido
         if self.preprocessing_function:

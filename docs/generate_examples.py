@@ -36,7 +36,7 @@ feature_extractor = tf.keras.Model(
 
 # Obtener activaciones
 features = feature_extractor(img_array)
-features = features[0]
+features_np = features.numpy()[0]  # Convertir a numpy y obtener el primer elemento del batch
 
 # Crear una imagen de ejemplo para la documentación
 plt.figure(figsize=(12, 8))
@@ -50,7 +50,7 @@ plt.axis('off')
 # Panel derecho: activaciones
 plt.subplot(1, 2, 2)
 # Mostrar solo los primeros 64 filtros en una cuadrícula de 8x8
-n_filters = 64
+n_filters = min(64, features_np.shape[2])  # Asegurar que no excedemos el número de filtros
 size = 8
 fig = plt.figure(figsize=(12, 8))
 
@@ -58,13 +58,15 @@ for i in range(n_filters):
     ax = fig.add_subplot(size, size, i + 1)
     
     # Obtener activación para este filtro
-    feature = features[:, :, i]
+    feature = features_np[:, :, i]
     
     # Normalizar para visualización
-    feature = (feature - feature.min()) / (feature.max() - feature.min() + 1e-8)
+    feature_min = np.min(feature)
+    feature_max = np.max(feature)
+    feature_norm = (feature - feature_min) / (feature_max - feature_min + 1e-8)
     
     # Mostrar activación
-    ax.imshow(feature, cmap='viridis')
+    ax.imshow(feature_norm, cmap='viridis')
     ax.axis('off')
 
 plt.tight_layout()
