@@ -157,10 +157,20 @@ class ControlPanel(QWidget):
             
             # Ajustar máximo de filtros según la capa
             max_filters = 0
-            if len(layer_info['shape']) == 4:  # Capa convolucional
-                max_filters = layer_info['shape'][-1] - 1
-            elif len(layer_info['shape']) == 2:  # Capa densa
-                max_filters = layer_info['shape'][-1] - 1
+            shape = layer_info['shape']
+            
+            # Verificar que shape no sea None y tenga elementos
+            if shape is not None:
+                if isinstance(shape, tuple) and len(shape) == 4:  # Capa convolucional
+                    if shape[-1] is not None:
+                        max_filters = shape[-1] - 1
+                    else:
+                        max_filters = 0
+                elif isinstance(shape, tuple) and len(shape) == 2:  # Capa densa
+                    if shape[-1] is not None:
+                        max_filters = shape[-1] - 1
+                    else:
+                        max_filters = 0
             
             # Actualizar controles de filtro
             self.filter_slider.setMaximum(max(0, max_filters))
