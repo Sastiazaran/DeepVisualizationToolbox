@@ -173,15 +173,30 @@ class ModelWrapper:
         """
         if layer_name is not None:
             layer = self.model.get_layer(layer_name)
+            # Manejar caso especial para InputLayer que no tiene output_shape directamente
+            if isinstance(layer, tf.keras.layers.InputLayer):
+                shape = layer.input_shape
+            else:
+                shape = layer.output_shape
+                
             return {
                 'name': layer.name,
                 'type': layer.__class__.__name__,
-                'shape': layer.output_shape,
+                'shape': shape,
                 'params': layer.count_params()
             }
         else:
-            return {layer.name: {
-                'type': layer.__class__.__name__,
-                'shape': layer.output_shape,
-                'params': layer.count_params()
-            } for layer in self.model.layers}
+            result = {}
+            for layer in self.model.layers:
+                # Manejar caso especial para InputLayer que no tiene output_shape directamente
+                if isinstance(layer, tf.keras.layers.InputLayer):
+                    shape = layer.input_shape
+                else:
+                    shape = layer.output_shape
+                    
+                result[layer.name] = {
+                    'type': layer.__class__.__name__,
+                    'shape': shape,
+                    'params': layer.count_params()
+                }
+            return result
