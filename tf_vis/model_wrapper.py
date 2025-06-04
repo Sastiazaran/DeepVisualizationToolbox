@@ -175,8 +175,14 @@ class ModelWrapper:
             layer = self.model.get_layer(layer_name)
             # Manejar caso especial para InputLayer
             if isinstance(layer, tf.keras.layers.InputLayer):
-                # Para InputLayer, usamos batch_input_shape que siempre está disponible
-                shape = layer.batch_input_shape
+                # Para InputLayer, intentamos diferentes atributos
+                if hasattr(layer, 'batch_input_shape'):
+                    shape = layer.batch_input_shape
+                elif hasattr(layer, 'input_shape'):
+                    shape = layer.input_shape
+                else:
+                    # Si no hay información de forma, usar una forma genérica
+                    shape = (None, None, None, None)
             else:
                 shape = layer.output_shape
                 
@@ -191,8 +197,14 @@ class ModelWrapper:
             for layer in self.model.layers:
                 # Manejar caso especial para InputLayer
                 if isinstance(layer, tf.keras.layers.InputLayer):
-                    # Para InputLayer, usamos batch_input_shape que siempre está disponible
-                    shape = layer.batch_input_shape
+                    # Para InputLayer, intentamos diferentes atributos
+                    if hasattr(layer, 'batch_input_shape'):
+                        shape = layer.batch_input_shape
+                    elif hasattr(layer, 'input_shape'):
+                        shape = layer.input_shape
+                    else:
+                        # Si no hay información de forma, usar una forma genérica
+                        shape = (None, None, None, None)
                 else:
                     shape = layer.output_shape
                     
