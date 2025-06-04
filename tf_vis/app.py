@@ -7,6 +7,7 @@ import sys
 import argparse
 import tensorflow as tf
 import numpy as np
+import cv2
 from PyQt5.QtWidgets import QApplication
 
 from .model_wrapper import ModelWrapper
