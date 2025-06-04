@@ -184,7 +184,15 @@ class ModelWrapper:
                     # Si no hay información de forma, usar una forma genérica
                     shape = (None, None, None, None)
             else:
-                shape = layer.output_shape
+                # Manejar caso donde output_shape puede no estar disponible
+                try:
+                    shape = layer.output_shape
+                except AttributeError:
+                    # Si output_shape no está disponible, intentar obtener la forma de otra manera
+                    if hasattr(layer, 'shape'):
+                        shape = layer.shape
+                    else:
+                        shape = None
                 
             return {
                 'name': layer.name,
@@ -206,7 +214,15 @@ class ModelWrapper:
                         # Si no hay información de forma, usar una forma genérica
                         shape = (None, None, None, None)
                 else:
-                    shape = layer.output_shape
+                    # Manejar caso donde output_shape puede no estar disponible
+                    try:
+                        shape = layer.output_shape
+                    except AttributeError:
+                        # Si output_shape no está disponible, intentar obtener la forma de otra manera
+                        if hasattr(layer, 'shape'):
+                            shape = layer.shape
+                        else:
+                            shape = None
                     
                 result[layer.name] = {
                     'type': layer.__class__.__name__,
