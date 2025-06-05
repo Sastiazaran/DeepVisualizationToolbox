@@ -1,5 +1,6 @@
 .aider*
 .env
+psa-sabia-llm-dv-4329cd2ee0ae.json
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
