@@ -7,11 +7,13 @@ import pytest
 
 from tf_vis.visualization import (
     apply_gradient_ascent,
+    clip_outliers,
     create_class_activation_map,
     display_activation_grid,
     normalize_01,
     overlay_heatmap,
     resolve_ascent_size,
+    standardize_for_display,
     visualize_layer_filters,
     visualize_max_activations,
 )
@@ -21,6 +23,38 @@ def test_normalize_01_handles_constant_arrays():
     result = normalize_01(np.full((4, 4), 7.0))
     assert np.isfinite(result).all()
     assert result.max() == pytest.approx(0.0)
+
+
+def test_standardize_for_display_centers_on_mid_grey():
+    result = standardize_for_display(np.full((4, 4), 3.0))
+    assert np.allclose(result, 0.5)
+
+
+def test_standardize_for_display_survives_outliers():
+    values = np.zeros((32, 32), dtype=np.float32)
+    values[0, 0] = 1000.0
+    values[1:4, 1:4] = 1.0
+
+    naive = normalize_01(values)
+    robust = standardize_for_display(values)
+
+    # Con min-max el detalle queda aplastado contra el negro; al estandarizar no.
+    assert naive[1, 1] < 0.01
+    assert robust[1, 1] > naive[1, 1]
+    assert 0.0 <= robust.min() <= robust.max() <= 1.0
+
+
+def test_clip_outliers_saturates_the_upper_tail():
+    values = np.linspace(0, 1, 100).astype(np.float32)
+    values[-1] = 500.0
+
+    clipped = clip_outliers(values, percentile=95.0)
+    assert clipped.max() == pytest.approx(1.0)
+    assert clipped[50] > normalize_01(values)[50]
+
+
+def test_clip_outliers_handles_all_zero_maps():
+    assert np.isfinite(clip_outliers(np.zeros((8, 8), dtype=np.float32))).all()
 
 
 def test_display_activation_grid_layout():

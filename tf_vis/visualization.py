@@ -25,6 +25,50 @@ def normalize_01(array: np.ndarray) -> np.ndarray:
     return (array - minimum) / (maximum - minimum + 1e-8)
 
 
+def standardize_for_display(array: np.ndarray, spread: float = 0.25) -> np.ndarray:
+    """
+    Centra un gradiente en gris medio y ajusta su contraste por desviación típica.
+
+    Los gradientes tienen unos pocos valores extremos que dominan el rango, así
+    que escalarlos por mínimo y máximo deja una imagen casi plana. Normalizar por
+    la desviación típica mantiene visible la estructura.
+
+    Args:
+        array: Gradiente a visualizar
+        spread: Fracción del rango que ocupa una desviación típica
+
+    Returns:
+        Array en [0, 1]
+    """
+    array = np.asarray(array, dtype=np.float32)
+    centered = array - float(np.mean(array))
+    std = float(np.std(centered))
+    if std > 0:
+        centered = centered / std
+    return np.clip(centered * spread + 0.5, 0.0, 1.0)
+
+
+def clip_outliers(array: np.ndarray, percentile: float = 99.0) -> np.ndarray:
+    """
+    Recorta la cola superior de un mapa y lo normaliza a [0, 1].
+
+    Un único píxel con un gradiente muy alto puede dejar el resto del mapa de
+    saliencia en negro; recortar por percentil evita ese efecto.
+
+    Args:
+        array: Mapa a normalizar
+        percentile: Percentil por encima del cual se satura
+
+    Returns:
+        Array en [0, 1]
+    """
+    array = np.asarray(array, dtype=np.float32)
+    limit = float(np.percentile(array, percentile))
+    if limit <= 0:
+        return normalize_01(array)
+    return np.clip(array / limit, 0.0, 1.0)
+
+
 def display_activation_grid(activations: np.ndarray, grid_size: tuple[int, int] | None = None,
                             padding: int = 1) -> np.ndarray:
     """

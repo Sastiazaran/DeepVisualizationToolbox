@@ -328,8 +328,10 @@ class ModelWrapper:
         Returns:
             Visualización normalizada a [0, 1]
         """
+        from .visualization import standardize_for_display
+
         grads = self.guided_backprop(image, layer_name, filter_indices)
-        return self._normalize_for_display(grads)
+        return standardize_for_display(grads)
 
     def saliency_map(self, image: np.ndarray, layer_name: str,
                      filter_indices: int | list[int] | None = None) -> np.ndarray:
@@ -345,9 +347,11 @@ class ModelWrapper:
         Returns:
             Mapa 2D normalizado a [0, 1]
         """
+        from .visualization import clip_outliers
+
         grads = self.compute_gradients(image, layer_name, filter_indices)[0]
         saliency = np.max(np.abs(grads), axis=-1)
-        return self._normalize_for_display(saliency)
+        return clip_outliers(saliency)
 
     @staticmethod
     def _normalize_for_display(img: np.ndarray) -> np.ndarray:
