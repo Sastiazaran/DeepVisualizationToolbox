@@ -5,7 +5,7 @@ y gradientes en cualquier capa de la red.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
 
 import keras
 import numpy as np
@@ -251,14 +251,7 @@ class ModelWrapper:
         extractor = self.get_activation_model(layer_name)
         img_tensor = tf.convert_to_tensor(self._as_batch(image))
 
-        @tf.custom_gradient
-        def guided_relu(x):
-            def grad(dy):
-                return tf.cast(dy > 0, dy.dtype) * tf.cast(x > 0, dy.dtype) * dy
-
-            return tf.nn.relu(x), grad
-
-        replaced = self._swap_relu_activations(extractor, guided_relu)
+        restore = self._install_guided_relu(extractor)
         try:
             with tf.GradientTape() as tape:
                 tape.watch(img_tensor)
@@ -266,8 +259,7 @@ class ModelWrapper:
                 target = self._reduce_to_target(layer_output, filter_indices)
             grads = tape.gradient(target, img_tensor)
         finally:
-            for layer, activation in replaced:
-                layer.activation = activation
+            restore()
 
         if grads is None:
             raise ValueError(
@@ -276,15 +268,52 @@ class ModelWrapper:
         return grads.numpy()[0]
 
     @staticmethod
-    def _swap_relu_activations(model: keras.Model, replacement) -> list[tuple[Any, Any]]:
-        """Sustituye temporalmente las activaciones ReLU y devuelve las originales."""
-        replaced = []
+    def _guided(forward: Callable) -> Callable:
+        """Envuelve una función de activación para que solo propague gradientes positivos."""
+
+        @tf.custom_gradient
+        def wrapped(x):
+            def grad(dy):
+                return tf.cast(dy > 0, dy.dtype) * tf.cast(x > 0, dy.dtype) * dy
+
+            return forward(x), grad
+
+        return wrapped
+
+    @classmethod
+    def _install_guided_relu(cls, model: keras.Model) -> Callable[[], None]:
+        """
+        Sustituye temporalmente las ReLU del modelo por su versión guiada.
+
+        Hay dos formas de declarar una ReLU y ambas se usan en las aplicaciones
+        de Keras: como argumento `activation` (VGG, InceptionV3) y como capa
+        `ReLU` independiente (ResNet, MobileNet, EfficientNet). Cubrir solo la
+        primera dejaba la retropropagación guiada sin efecto en buena parte de
+        las arquitecturas modernas.
+
+        Returns:
+            Función que restaura el modelo a su estado original.
+        """
+        undo: list[Callable[[], None]] = []
+
         for layer in model.layers:
-            activation = getattr(layer, 'activation', None)
-            if activation is keras.activations.relu:
-                replaced.append((layer, activation))
-                layer.activation = replacement
-        return replaced
+            if getattr(layer, 'activation', None) is keras.activations.relu:
+                original_activation = layer.activation
+                layer.activation = cls._guided(original_activation)
+                undo.append(
+                    lambda lyr=layer, act=original_activation: setattr(lyr, 'activation', act)
+                )
+            elif isinstance(layer, keras.layers.ReLU):
+                # `call` es un método de clase; se sustituye por un atributo de
+                # instancia y se restaura eliminándolo, no reasignándolo.
+                layer.call = cls._guided(layer.call)
+                undo.append(lambda lyr=layer: lyr.__dict__.pop('call', None))
+
+        def restore() -> None:
+            for action in undo:
+                action()
+
+        return restore
 
     def deconv(self, image: np.ndarray, layer_name: str,
                filter_indices: int | list[int] | None = None) -> np.ndarray:

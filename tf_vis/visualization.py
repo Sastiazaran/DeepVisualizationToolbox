@@ -97,9 +97,41 @@ def visualize_layer_filters(model: keras.Model, layer_name: str,
     return display_activation_grid(kernels, grid_size)
 
 
+def resolve_ascent_size(model_wrapper: ModelWrapper,
+                        image_size: tuple[int, int] | None) -> tuple[int, int]:
+    """
+    Determina el tamaño `(alto, ancho)` de la imagen a optimizar.
+
+    Los modelos con `include_top=True` fijan su resolución de entrada, así que
+    pedir otro tamaño produciría un error de forma poco descriptivo dentro de
+    Keras. Los modelos sin cabeza aceptan cualquier resolución.
+
+    Args:
+        model_wrapper: Wrapper del modelo
+        image_size: Tamaño solicitado, o `None` para usar el nativo del modelo
+
+    Returns:
+        Tamaño `(alto, ancho)` utilizable
+    """
+    shape = model_wrapper.input_shape
+    native = (shape[1], shape[2]) if len(shape) == 4 else (None, None)
+
+    if image_size is None:
+        return (native[0] or 224, native[1] or 224)
+
+    fixed = tuple(dim for dim in native if dim is not None)
+    if fixed and tuple(native) != tuple(image_size):
+        raise ValueError(
+            f"El modelo espera entradas de {native[0]}x{native[1]}; no se puede optimizar "
+            f"una imagen de {image_size[0]}x{image_size[1]}. Carga el modelo con "
+            "include_top=False para admitir cualquier resolución."
+        )
+    return tuple(image_size)
+
+
 def apply_gradient_ascent(model_wrapper: ModelWrapper, layer_name: str, filter_index: int,
                           iterations: int = 30, step_size: float = 1.0,
-                          image_size: tuple[int, int] = (224, 224),
+                          image_size: tuple[int, int] | None = None,
                           seed: int | None = None) -> np.ndarray:
     """
     Genera por ascenso de gradiente una imagen que maximiza la activación de un filtro.
@@ -110,27 +142,33 @@ def apply_gradient_ascent(model_wrapper: ModelWrapper, layer_name: str, filter_i
         filter_index: Índice del filtro a maximizar
         iterations: Número de iteraciones de optimización
         step_size: Tamaño del paso
-        image_size: Tamaño (alto, ancho) de la imagen a generar
+        image_size: Tamaño `(alto, ancho)` de la imagen; `None` usa el nativo del modelo
         seed: Semilla para la inicialización aleatoria, útil en tests
 
     Returns:
         Imagen generada, normalizada a [0, 1]
     """
     extractor = model_wrapper.get_activation_model(layer_name)
+    height, width = resolve_ascent_size(model_wrapper, image_size)
 
     rng = np.random.default_rng(seed)
-    img = rng.random((1, image_size[0], image_size[1], 3), dtype=np.float32) * 0.1 + 0.45
+    img = rng.random((1, height, width, 3), dtype=np.float32) * 0.1 + 0.45
     img_tensor = tf.Variable(img, dtype=tf.float32)
 
-    is_spatial = is_spatial_shape(model_wrapper.get_layer_shape(layer_name))
+    layer_shape = model_wrapper.get_layer_shape(layer_name)
+    is_spatial = is_spatial_shape(layer_shape)
+    # Se descartan los bordes, dominados por el padding, salvo en mapas de
+    # características tan pequeños que recortarlos los dejaría vacíos.
+    margin = 2 if is_spatial and min(layer_shape[1] or 0, layer_shape[2] or 0) > 6 else 0
 
     for _ in range(iterations):
         with tf.GradientTape() as tape:
             tape.watch(img_tensor)
             layer_output = extractor(img_tensor, training=False)
             if is_spatial:
-                # Se descartan los bordes, cuyas activaciones están dominadas por el padding.
-                loss = tf.reduce_mean(layer_output[:, 2:-2, 2:-2, filter_index])
+                cropped = (layer_output[:, margin:-margin, margin:-margin, filter_index]
+                           if margin else layer_output[:, :, :, filter_index])
+                loss = tf.reduce_mean(cropped)
             else:
                 loss = tf.reduce_mean(layer_output[:, filter_index])
 

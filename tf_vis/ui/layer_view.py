@@ -151,15 +151,17 @@ class _ActivationTile(QWidget):
         title.setAlignment(ALIGN_CENTER)
         layout.addWidget(title)
 
-        self.value_label = QLabel()
-        self.value_label.setAlignment(ALIGN_CENTER)
-        layout.addWidget(self.value_label)
-
         if dense:
+            # Solo las neuronas densas muestran su valor numérico; reservar la
+            # etiqueta también para los filtros dejaba sin espacio a la imagen.
+            self.value_label = QLabel()
+            self.value_label.setAlignment(ALIGN_CENTER)
+            layout.addWidget(self.value_label)
             self.bar = _ValueBar()
             layout.addWidget(self.bar)
             self.image_label = None
         else:
+            self.value_label = None
             self.bar = None
             self.image_label = QLabel()
             self.image_label.setAlignment(ALIGN_CENTER)

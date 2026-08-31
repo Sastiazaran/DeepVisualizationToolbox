@@ -153,6 +153,18 @@ def test_clicking_a_filter_updates_the_control_panel(qt_app, wrapper, fetcher):
     assert window.current_filter == 3
 
 
+def test_predictions_are_skipped_without_an_imagenet_head(qt_app, wrapper, fetcher):
+    window = MainWindow(wrapper, fetcher)
+    window.timer.stop()
+
+    # El modelo de juguete tiene 10 clases, así que no se puede etiquetar con ImageNet.
+    assert window._has_imagenet_head is False
+    assert 'no disponibles' in window.prediction_label.text()
+
+    window.update_display()
+    assert window._last_error is None
+
+
 def test_navigation_keys_change_image(qt_app, wrapper, fetcher):
     window = MainWindow(wrapper, fetcher)
     window.timer.stop()

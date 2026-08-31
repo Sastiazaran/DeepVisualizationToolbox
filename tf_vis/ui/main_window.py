@@ -5,6 +5,7 @@ Ventana principal de la aplicación de visualización.
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime
 
 import numpy as np
@@ -32,6 +33,10 @@ from .qt_compat import ALIGN_CENTER, KEEP_ASPECT_RATIO, SMOOTH_TRANSFORMATION, n
 
 LIVE_REFRESH_MS = 100
 STATIC_REFRESH_MS = 500
+# Las predicciones exigen una inferencia completa, más cara que extraer la
+# activación de una sola capa, así que se refrescan más despacio que la imagen.
+PREDICTION_INTERVAL_S = 0.5
+IMAGENET_CLASSES = 1000
 
 
 class MainWindow(QMainWindow):
@@ -66,8 +71,17 @@ class MainWindow(QMainWindow):
         # o la selección, no en cada tic del temporizador.
         self._needs_refresh = True
         self._last_error: str | None = None
+        self._last_prediction_time = 0.0
+
+        output_shape = tuple(model_wrapper.model.outputs[0].shape)
+        self._has_imagenet_head = (
+            len(output_shape) == 2 and output_shape[-1] == IMAGENET_CLASSES
+        )
 
         self.init_ui()
+        if not self._has_imagenet_head:
+            self.prediction_label.setText(
+                "Predicciones: no disponibles (el modelo no tiene cabeza de ImageNet)")
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_display)
@@ -180,6 +194,7 @@ class MainWindow(QMainWindow):
         raw = self.input_fetcher.current_raw_image
         if raw is not None:
             self._display_image(raw, self.input_display)
+        self._show_predictions()
 
     def _update_visualization(self) -> None:
         """Calcula y muestra la visualización correspondiente al modo activo."""
@@ -203,10 +218,8 @@ class MainWindow(QMainWindow):
         elif mode == 'optimization':
             if self.optimized_image is None:
                 self.statusBar().showMessage('Generando visualización optimizada...')
-                height, width = self.current_image.shape[:2]
                 self.optimized_image = apply_gradient_ascent(
-                    self.model_wrapper, layer, self.current_filter,
-                    image_size=(height, width))
+                    self.model_wrapper, layer, self.current_filter)
                 self.statusBar().showMessage('Visualización optimizada generada')
             self._display_image(self.optimized_image, self.optim_display)
 
@@ -227,15 +240,29 @@ class MainWindow(QMainWindow):
             self.model_wrapper, self.current_image, self.current_layer, class_idx)
         raw = self.input_fetcher.current_raw_image
         self._display_image(overlay_heatmap(raw, cam), self.cam_display)
-        self._show_predictions()
 
     def _show_predictions(self) -> None:
-        """Muestra las clases top-3 del modelo para la imagen actual."""
+        """
+        Muestra las clases top-3 del modelo para la imagen actual.
+
+        Solo tiene sentido con una cabeza de clasificación de ImageNet, y se
+        limita su frecuencia para no lanzar una inferencia completa en cada
+        frame cuando la entrada es una webcam.
+        """
+        if not self._has_imagenet_head:
+            return
+
+        now = time.monotonic()
+        if now - self._last_prediction_time < PREDICTION_INTERVAL_S:
+            return
+        self._last_prediction_time = now
+
         try:
             top = predict_image(self.model_wrapper.model, self.current_image, top_k=3,
                                 model_name=self.model_name)
-        except Exception:
-            self.prediction_label.setText("Predicciones: no disponibles para este modelo")
+        except (ValueError, OSError) as error:
+            self._has_imagenet_head = False
+            self.prediction_label.setText(f"Predicciones no disponibles: {error}")
             return
 
         text = ' | '.join(f'{label} {prob:.1%}' for _, label, prob in top)

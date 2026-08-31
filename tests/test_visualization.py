@@ -11,6 +11,7 @@ from tf_vis.visualization import (
     display_activation_grid,
     normalize_01,
     overlay_heatmap,
+    resolve_ascent_size,
     visualize_layer_filters,
     visualize_max_activations,
 )
@@ -49,6 +50,40 @@ def test_visualize_layer_filters(toy_model):
 def test_visualize_layer_filters_rejects_non_conv(toy_model):
     with pytest.raises(ValueError, match='no es una capa convolucional'):
         visualize_layer_filters(toy_model, 'predictions')
+
+
+def test_resolve_ascent_size_defaults_to_native_input(wrapper):
+    assert resolve_ascent_size(wrapper, None) == (32, 32)
+
+
+def test_resolve_ascent_size_rejects_mismatch_on_fixed_models(wrapper):
+    # El modelo de juguete fija su entrada en 32x32, igual que un modelo con
+    # include_top=True; pedir otro tamaño debe fallar con un mensaje claro.
+    with pytest.raises(ValueError, match='include_top=False'):
+        resolve_ascent_size(wrapper, (64, 64))
+
+
+def test_resolve_ascent_size_allows_any_size_on_headless_models():
+    import keras
+
+    from tf_vis.model_wrapper import ModelWrapper
+
+    inputs = keras.Input((None, None, 3))
+    outputs = keras.layers.Conv2D(4, 3, name='conv')(inputs)
+    headless = ModelWrapper(keras.Model(inputs, outputs))
+
+    assert resolve_ascent_size(headless, (48, 64)) == (48, 64)
+    assert resolve_ascent_size(headless, None) == (224, 224)
+
+
+def test_gradient_ascent_uses_native_size_by_default(wrapper):
+    assert apply_gradient_ascent(wrapper, 'conv1', 0, iterations=1).shape == (32, 32, 3)
+
+
+def test_gradient_ascent_handles_small_feature_maps(wrapper):
+    # `conv2` produce mapas de 16x16, pero el recorte de bordes no debe vaciarlos.
+    image = apply_gradient_ascent(wrapper, 'conv2', 0, iterations=2, seed=0)
+    assert np.isfinite(image).all()
 
 
 def test_gradient_ascent_produces_valid_image(wrapper):

@@ -97,6 +97,44 @@ def test_guided_backprop_restores_activations(wrapper, sample_image):
     assert conv.activation is original is keras.activations.relu
 
 
+def test_guided_backprop_handles_relu_layers(sample_image):
+    """Las arquitecturas modernas declaran la ReLU como capa, no como `activation`."""
+    import keras
+
+    from tf_vis.model_wrapper import ModelWrapper
+
+    inputs = keras.Input((32, 32, 3))
+    x = keras.layers.Conv2D(4, 3, padding='same', name='conv')(inputs)
+    x = keras.layers.ReLU(name='relu')(x)
+    outputs = keras.layers.Conv2D(4, 3, padding='same', name='conv_out')(x)
+    relu_wrapper = ModelWrapper(keras.Model(inputs, outputs))
+
+    relu_layer = relu_wrapper.model.get_layer('relu')
+
+    plain = relu_wrapper.compute_gradients(sample_image, 'conv_out', 0)[0]
+    guided = relu_wrapper.guided_backprop(sample_image, 'conv_out', 0)
+
+    assert 'call' not in relu_layer.__dict__, 'la capa ReLU debe restaurarse'
+    # Si la capa ReLU se hubiera ignorado, el resultado sería el gradiente en bruto.
+    assert not np.allclose(plain, guided)
+
+
+def test_guided_backprop_matches_plain_gradients_without_relu(sample_image):
+    """Sin ninguna ReLU en el camino no hay gradientes que descartar."""
+    import keras
+
+    from tf_vis.model_wrapper import ModelWrapper
+
+    inputs = keras.Input((32, 32, 3))
+    outputs = keras.layers.Conv2D(4, 3, padding='same', name='conv_out')(inputs)
+    linear = ModelWrapper(keras.Model(inputs, outputs))
+
+    plain = linear.compute_gradients(sample_image, 'conv_out', 0)[0]
+    guided = linear.guided_backprop(sample_image, 'conv_out', 0)
+
+    assert np.allclose(plain, guided, atol=1e-6)
+
+
 def test_deconv_is_normalized(wrapper, sample_image):
     deconv = wrapper.deconv(sample_image, 'conv2', filter_indices=1)
     assert deconv.shape == (32, 32, 3)
