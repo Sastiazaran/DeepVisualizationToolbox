@@ -50,7 +50,7 @@ def _configure_devices(use_gpu: bool) -> None:
     """Configura la visibilidad de la GPU antes de importar TensorFlow."""
     if not use_gpu:
         # Debe hacerse antes de importar TensorFlow para que surta efecto.
-        os.environ.setdefault('CUDA_VISIBLE_DEVICES', '-1')
+        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
         print("Ejecutando en CPU (usa --gpu para habilitar la GPU)")
 
 
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     _configure_devices(args.gpu)
 
-    from .utils.misc import get_model_specs, load_model, load_model_from_file
+    from .utils.misc import get_model_spec, get_model_specs, load_model_from_file
 
     if args.list_models:
         for name, spec in sorted(get_model_specs().items()):
@@ -76,8 +76,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"Cargando modelo {args.model}...")
             weights = None if args.weights.lower() == 'none' else args.weights
-            model = load_model(args.model, weights=weights, include_top=args.include_top)
-            spec = get_model_specs()[args.model.lower().replace('-', '_')]
+            spec = get_model_spec(args.model)
+            model = spec.constructor(weights=weights, include_top=args.include_top)
             preprocess_fn = spec.preprocess
             model_name = args.model
             default_size = (spec.input_shape[1], spec.input_shape[0])

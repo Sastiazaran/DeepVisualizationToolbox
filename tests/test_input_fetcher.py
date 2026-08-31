@@ -112,6 +112,62 @@ def test_webcam_falls_back_to_synthetic_when_unavailable():
     assert fetcher.get_next_image().shape == (16, 16, 3)
 
 
+class _FakeWebcam:
+    """Cámara simulada que entrega un número fijo de frames y luego falla."""
+
+    def __init__(self, frames: int):
+        self.remaining = frames
+        self.released = False
+
+    def isOpened(self):  # noqa: N802 - API de OpenCV
+        return True
+
+    def read(self):
+        if self.remaining <= 0:
+            return False, None
+        self.remaining -= 1
+        return True, np.full((48, 64, 3), 30, dtype=np.uint8)
+
+    def release(self):
+        self.released = True
+
+
+def _webcam_fetcher(monkeypatch, frames: int) -> InputFetcher:
+    import cv2
+
+    monkeypatch.setattr(cv2, 'VideoCapture', lambda device_id: _FakeWebcam(frames))
+    return InputFetcher(input_source='webcam', target_size=(16, 16))
+
+
+def test_webcam_source_is_live_and_resizes(monkeypatch):
+    fetcher = _webcam_fetcher(monkeypatch, frames=3)
+    assert fetcher.is_live is True
+    assert len(fetcher) == 0
+    assert fetcher.get_next_image().shape == (16, 16, 3)
+
+
+def test_webcam_falls_back_when_a_frame_fails(monkeypatch):
+    fetcher = _webcam_fetcher(monkeypatch, frames=1)
+    fetcher.get_next_image()
+    # El segundo frame falla, pero la fuente debe seguir entregando imágenes.
+    assert fetcher.get_next_image().shape == (16, 16, 3)
+
+
+def test_webcam_index_navigation_returns_frames(monkeypatch):
+    fetcher = _webcam_fetcher(monkeypatch, frames=5)
+    for getter in (fetcher.get_previous_image, fetcher.get_current_image):
+        assert getter().shape == (16, 16, 3)
+    assert fetcher.get_specific_image(42).shape == (16, 16, 3)
+
+
+def test_close_releases_the_webcam(monkeypatch):
+    fetcher = _webcam_fetcher(monkeypatch, frames=1)
+    webcam = fetcher.webcam
+    fetcher.close()
+    assert webcam.released is True
+    assert fetcher.webcam is None
+
+
 def test_context_manager_closes(image_dir):
     with InputFetcher(input_source=f'directory:{image_dir}', target_size=(8, 8)) as fetcher:
         fetcher.get_next_image()

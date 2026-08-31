@@ -159,9 +159,8 @@ def predict_image(model: keras.Model, img: np.ndarray, top_k: int = 5,
         model: Modelo Keras
         img: Imagen ya preprocesada
         top_k: Número de clases top a devolver
-        model_name: Nombre del modelo, usado para decodificar etiquetas de ImageNet.
-            Si se omite se usa el decodificador de VGG16, válido para cualquier
-            modelo entrenado con las 1000 clases estándar de ImageNet.
+        model_name: Aceptado por compatibilidad; todas las aplicaciones de Keras
+            comparten el mismo orden de clases de ImageNet.
 
     Returns:
         Lista de tuplas (índice, etiqueta, probabilidad)

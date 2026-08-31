@@ -6,12 +6,19 @@ import numpy as np
 import pytest
 
 from tf_vis.utils.image_utils import (
+    apply_gradcam,
     create_grid_of_images,
     deprocess_image,
     load_image,
+    overlay_gradcam,
     preprocess_image_for_model,
 )
-from tf_vis.utils.layers import describe_layer, is_spatial_shape, layer_num_units
+from tf_vis.utils.layers import (
+    describe_layer,
+    is_spatial_shape,
+    layer_num_units,
+    layer_output_shape,
+)
 from tf_vis.utils.misc import (
     count_params,
     create_model_summary,
@@ -77,6 +84,24 @@ def test_is_spatial_shape():
     assert is_spatial_shape(None) is False
 
 
+def test_layer_output_shape_falls_back_to_legacy_attributes():
+    class LegacyLayer:
+        """Capa al estilo de Keras 2, sin tensor `output` construido."""
+
+        output = None
+        batch_input_shape = (None, 8, 8, 3)
+
+    assert layer_output_shape(LegacyLayer()) == (None, 8, 8, 3)
+
+
+def test_layer_output_shape_returns_none_when_unknown():
+    class Opaque:
+        output = None
+
+    assert layer_output_shape(Opaque()) is None
+    assert layer_num_units(Opaque()) == 0
+
+
 def test_create_model_summary(toy_model):
     summary = create_model_summary(toy_model)
     assert summary['name'] == 'toy_cnn'
@@ -132,6 +157,87 @@ def test_deprocess_roundtrip_for_scaled_models():
     img = np.full((4, 4, 3), 200, dtype=np.float32)
     restored = deprocess_image(preprocess_image_for_model(img, 'mobilenet'), 'mobilenet')
     assert np.allclose(restored, 200 / 255.0, atol=1e-4)
+
+
+def test_apply_gradcam(toy_model, sample_image):
+    heatmap = apply_gradcam(toy_model, sample_image, 'conv2', class_idx=1)
+    assert heatmap.shape == (16, 16)
+    assert 0.0 <= heatmap.min() <= heatmap.max() <= 1.0
+
+
+def test_apply_gradcam_defaults_to_the_predicted_class(toy_model, sample_image):
+    predicted = int(np.argmax(toy_model.predict(sample_image[None], verbose=0)[0]))
+    assert np.allclose(
+        apply_gradcam(toy_model, sample_image, 'conv2'),
+        apply_gradcam(toy_model, sample_image, 'conv2', class_idx=predicted),
+    )
+
+
+def test_apply_gradcam_never_returns_nan(toy_model):
+    # Un mapa de calor íntegramente nulo dividía por cero y producía NaN.
+    heatmap = apply_gradcam(toy_model, np.zeros((32, 32, 3), dtype=np.float32), 'conv1', 0)
+    assert np.isfinite(heatmap).all()
+
+
+def test_overlay_gradcam(sample_image):
+    heatmap = np.linspace(0, 1, 256).reshape(16, 16).astype(np.float32)
+    overlay = overlay_gradcam(sample_image, heatmap)
+    assert overlay.shape == (32, 32, 3)
+    assert overlay.dtype == np.uint8
+
+
+def test_imagenet_labels_use_the_keras_class_order(tmp_path, monkeypatch):
+    """
+    El archivo `ImageNetLabels.txt` de TensorFlow tiene 1001 entradas por incluir
+    una clase de fondo, así que usarlo desplazaba todas las etiquetas un índice.
+    """
+    import json
+
+    import keras
+
+    import tf_vis.utils.misc as misc
+
+    index_file = tmp_path / 'imagenet_class_index.json'
+    index_file.write_text(json.dumps({
+        '0': ['n01440764', 'tench'],
+        '1': ['n01443537', 'goldfish'],
+        '2': ['n01484850', 'great_white_shark'],
+    }))
+
+    monkeypatch.setattr(misc, '_IMAGENET_LABELS', None)
+    monkeypatch.setattr(keras.utils, 'get_file', lambda *args, **kwargs: str(index_file))
+
+    labels = misc.get_imagenet_labels()
+
+    assert labels == ['tench', 'goldfish', 'great_white_shark']
+    # La segunda llamada se sirve de la caché en memoria.
+    assert misc.get_imagenet_labels() == labels
+
+
+def test_predict_image_maps_indices_to_labels(toy_model, sample_image, monkeypatch):
+    import tf_vis.utils.misc as misc
+
+    # Etiquetar con ImageNet requiere descargar el índice de clases de Keras.
+    monkeypatch.setattr(misc, 'get_imagenet_labels', lambda name=None: [
+        f'clase_{i}' for i in range(1000)
+    ])
+
+    results = misc.predict_image(toy_model, sample_image, top_k=3)
+
+    assert len(results) == 3
+    probabilities = [prob for _, _, prob in results]
+    assert probabilities == sorted(probabilities, reverse=True)
+    for idx, label, _ in results:
+        assert label == f'clase_{idx}'
+
+
+def test_predict_image_falls_back_for_out_of_range_indices(toy_model, sample_image, monkeypatch):
+    import tf_vis.utils.misc as misc
+
+    monkeypatch.setattr(misc, 'get_imagenet_labels', lambda name=None: ['solo_una'])
+    results = misc.predict_image(toy_model, sample_image, top_k=2)
+
+    assert all(label.startswith(('solo_una', 'class_')) for _, label, _ in results)
 
 
 def test_create_grid_of_images():

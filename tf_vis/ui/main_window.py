@@ -353,7 +353,9 @@ class MainWindow(QMainWindow):
             payload['optimization'] = self.optimized_image
 
         if self.current_layer and self.current_vis_mode in ('gradients', 'deconv'):
-            payload[self.current_vis_mode] = self.model_wrapper.deconv(
+            compute = (self.model_wrapper.saliency_map if self.current_vis_mode == 'gradients'
+                       else self.model_wrapper.deconv)
+            payload[self.current_vis_mode] = compute(
                 self.current_image, self.current_layer, self.current_filter)
 
         written = save_visualizations(payload, self.output_dir, prefix=stamp)

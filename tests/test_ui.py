@@ -153,6 +153,71 @@ def test_clicking_a_filter_updates_the_control_panel(qt_app, wrapper, fetcher):
     assert window.current_filter == 3
 
 
+def test_optimization_mode_renders_and_caches(qt_app, wrapper, fetcher):
+    window = MainWindow(wrapper, fetcher)
+    window.timer.stop()
+    window.on_layer_selected('conv1')
+    window.on_vis_mode_changed('optimization')
+
+    window.update_display()
+    assert window._last_error is None
+    first = window.optimized_image
+    assert first is not None
+
+    # Sin cambiar la selección, la imagen optimizada se reutiliza.
+    window._request_refresh()
+    window.update_display()
+    assert window.optimized_image is first
+
+    # Cambiar de filtro invalida la caché.
+    window.on_filter_selected(2)
+    assert window.optimized_image is None
+
+
+def test_gradcam_reports_unsupported_layers(qt_app, wrapper, fetcher):
+    window = MainWindow(wrapper, fetcher)
+    window.timer.stop()
+    window.on_layer_selected('predictions')
+    window.on_vis_mode_changed('gradcam')
+
+    window.update_display()
+
+    assert 'convolucional' in window.statusBar().currentMessage()
+    assert window._last_error is None
+
+
+def test_keyboard_shortcuts_are_dispatched(qt_app, wrapper, fetcher):
+    from PyQt6.QtCore import QEvent, Qt
+    from PyQt6.QtGui import QKeyEvent
+
+    window = MainWindow(wrapper, fetcher)
+    window.timer.stop()
+    panel = window.control_panel
+    panel.layer_combo.setCurrentIndex(panel.layer_names.index('conv1'))
+    window.update_display()
+
+    def press(key):
+        window.keyPressEvent(
+            QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+        )
+
+    press(Qt.Key.Key_Down)
+    assert panel.filter_spin.value() == 1
+
+    press(Qt.Key.Key_Up)
+    assert panel.filter_spin.value() == 0
+
+    first = np.array(fetcher.current_raw_image)
+    press(Qt.Key.Key_Right)
+    assert not np.array_equal(first, fetcher.current_raw_image)
+
+    press(Qt.Key.Key_Left)
+    assert np.array_equal(first, fetcher.current_raw_image)
+
+    press(Qt.Key.Key_H)
+    assert 'Esc' in window.statusBar().currentMessage()
+
+
 def test_predictions_are_skipped_without_an_imagenet_head(qt_app, wrapper, fetcher):
     window = MainWindow(wrapper, fetcher)
     window.timer.stop()
