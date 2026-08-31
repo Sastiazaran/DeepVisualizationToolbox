@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tf-feature-vis"
+version = "0.2.0"
+description = "Interactive feature visualization toolbox for TensorFlow/Keras convolutional networks"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Sastiazaran", email = "sastiazaran2000@gmail.com" }]
+keywords = [
+    "tensorflow",
+    "keras",
+    "deep-learning",
+    "visualization",
+    "interpretability",
+    "grad-cam",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+dependencies = [
+    "tensorflow>=2.16",
+    "keras>=3.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pillow>=10.0",
+    "opencv-python>=4.9",
+    "scikit-image>=0.22",
+    "PyQt6>=6.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/Sastiazaran/DeepVisualizationToolbox"
+Repository = "https://github.com/Sastiazaran/DeepVisualizationToolbox"
+Issues = "https://github.com/Sastiazaran/DeepVisualizationToolbox/issues"
+
+[project.scripts]
+tf-feature-vis = "tf_vis.app:main"
+
+[tool.setuptools.packages.find]
+include = ["tf_vis*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]

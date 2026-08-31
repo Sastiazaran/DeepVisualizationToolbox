@@ -1,8 +1,11 @@
-tensorflow>=2.4.0
-numpy>=1.19.0
-scipy>=1.6.0
-matplotlib>=3.3.0
-pillow>=8.0.0
-opencv-python>=4.5.0
-scikit-image>=0.18.0
-PyQt5>=5.15.0  # Para la interfaz gráfica
+# Runtime dependencies. Kept in sync with [project.dependencies] in pyproject.toml.
+# Prefer `pip install -e .` (or `pip install -e ".[dev]"`) which reads pyproject.toml.
+tensorflow>=2.16
+keras>=3.0
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8
+pillow>=10.0
+opencv-python>=4.9
+scikit-image>=0.22
+PyQt6>=6.6
