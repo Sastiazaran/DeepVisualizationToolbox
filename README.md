@@ -2,6 +2,8 @@
 
 Una herramienta interactiva para visualizar y entender redes neuronales convolucionales implementadas en TensorFlow/Keras.
 
+**Idiomas:** [Español](README.md) · [English](README.en.md)
+
 [![CI](https://github.com/Sastiazaran/DeepVisualizationToolbox/actions/workflows/ci.yml/badge.svg)](https://github.com/Sastiazaran/DeepVisualizationToolbox/actions/workflows/ci.yml)
 
 ## Características
@@ -170,7 +172,7 @@ python docs/generate_examples.py --image mi_imagen.jpg
 
 ## Documentación
 
-La guía completa está en [`docs/README.md`](docs/README.md).
+La guía completa está en [`docs/README.md`](docs/README.md) (español) y [`docs/README.en.md`](docs/README.en.md) (inglés).
 
 ## Licencia
 

@@ -2,6 +2,8 @@
 
 Esta documentación describe cómo usar y extender la herramienta de visualización de características para redes neuronales en TensorFlow/Keras.
 
+**Idiomas:** [Español](README.md) · [English](README.en.md)
+
 ## Índice
 
 1. [Introducción](#introducción)
