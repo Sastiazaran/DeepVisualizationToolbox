@@ -1,6 +1,8 @@
 # Documentación de TensorFlow Feature Visualization Toolbox
 
-Esta documentación proporciona información detallada sobre cómo usar y extender la herramienta de visualización de características para redes neuronales en TensorFlow.
+Esta documentación describe cómo usar y extender la herramienta de visualización de características para redes neuronales en TensorFlow/Keras.
+
+**Idiomas:** [Español](README.md) · [English](README.en.md)
 
 ## Índice
 
@@ -15,328 +17,332 @@ Esta documentación proporciona información detallada sobre cómo usar y extend
 
 ## Introducción
 
-TensorFlow Feature Visualization Toolbox es una herramienta interactiva diseñada para ayudar a entender y visualizar el funcionamiento interno de redes neuronales convolucionales. Permite observar en tiempo real cómo diferentes capas de la red procesan imágenes, qué características detectan los filtros, y cómo se pueden generar imágenes que maximizan la activación de neuronas específicas.
+TensorFlow Feature Visualization Toolbox es una herramienta interactiva diseñada para ayudar a entender el funcionamiento interno de redes neuronales convolucionales. Permite observar en tiempo real cómo las distintas capas procesan una imagen, qué características detecta cada filtro, y qué regiones de la imagen sustentan una predicción.
 
 ### ¿Por qué visualizar redes neuronales?
 
-Las redes neuronales profundas a menudo se consideran "cajas negras" debido a su complejidad y la dificultad para interpretar su funcionamiento interno. La visualización de características ayuda a:
+Las redes profundas se comportan a menudo como cajas negras. Visualizar sus características ayuda a:
 
-- **Entender qué aprende cada capa**: Las primeras capas suelen detectar bordes y texturas simples, mientras que las capas más profundas detectan patrones más complejos y específicos.
-- **Diagnosticar problemas**: Identificar filtros que no se activan o que se especializan demasiado.
-- **Mejorar arquitecturas**: Informar decisiones sobre el diseño de nuevas arquitecturas de red.
-- **Explicar predicciones**: Proporcionar información sobre por qué la red toma ciertas decisiones.
+- **Entender qué aprende cada capa**: las primeras capas detectan bordes y texturas, y las profundas patrones cada vez más específicos.
+- **Diagnosticar problemas**: identificar filtros muertos o excesivamente especializados.
+- **Mejorar arquitecturas**: informar decisiones de diseño con evidencia.
+- **Explicar predicciones**: mostrar en qué se fija el modelo al clasificar.
 
 ## Instalación
 
 ### Requisitos previos
 
-- Python 3.7 o superior
-- TensorFlow 2.4 o superior
-- PyQt5 para la interfaz gráfica
-- Dependencias adicionales listadas en `requirements.txt`
+- Python 3.10 o superior
+- TensorFlow 2.16 o superior (que incluye Keras 3)
+- PyQt6 para la interfaz gráfica
+
+> **Nota sobre versiones.** A partir de TensorFlow 2.16, `tf.keras` es Keras 3, que eliminó atributos como `layer.output_shape` y `layer.batch_input_shape`. El toolbox usa las APIs de Keras 3 y no es compatible con Keras 2.
 
 ### Pasos de instalación
 
-1. Clonar el repositorio:
-   ```bash
-   git clone https://github.com/tu-usuario/tf-feature-vis.git
-   cd tf-feature-vis
-   ```
+```bash
+git clone https://github.com/Sastiazaran/DeepVisualizationToolbox.git
+cd DeepVisualizationToolbox
 
-2. Instalar dependencias:
-   ```bash
-   pip install -r requirements.txt
-   ```
+python -m venv .venv
+source .venv/bin/activate
 
-3. Instalar el paquete en modo desarrollo:
-   ```bash
-   pip install -e .
-   ```
+pip install -e .          # o pip install -e ".[dev]" para desarrollar
+```
+
+En Linux, PyQt6 necesita algunas bibliotecas del sistema:
+
+```bash
+sudo apt-get install libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0
+```
 
 ## Uso básico
 
 ### Ejecutar la aplicación
 
-La forma más sencilla de iniciar la aplicación es:
-
 ```bash
-python run_toolbox.py
+tf-feature-vis
 ```
 
-Esto iniciará la aplicación con la configuración predeterminada (modelo VGG16 y entrada de webcam).
+Esto inicia la aplicación con VGG16 y la webcam. Si no hay cámara disponible, la fuente cae automáticamente a imágenes sintéticas.
 
 ### Opciones de línea de comandos
 
-La aplicación acepta varios argumentos para personalizar su comportamiento:
-
 ```bash
-python run_toolbox.py --model resnet50 --input-source directory:./mis_imagenes --gpu
+tf-feature-vis --model resnet50 --input-source directory:./mis_imagenes --gpu
 ```
 
-Argumentos disponibles:
-
-- `--model`: Modelo a utilizar (vgg16, resnet50, inception_v3, etc.)
-- `--weights`: Pesos a utilizar (imagenet o ruta a archivo)
-- `--include-top`: Incluir capas de clasificación (predeterminado: True)
-- `--input-source`: Fuente de entrada (webcam, directory:ruta, file:ruta, dataset:nombre)
-- `--input-size`: Tamaño de entrada como ancho alto (predeterminado: 224 224)
-- `--gpu`: Usar GPU para cálculos
+| Argumento | Descripción |
+| --- | --- |
+| `--model` | Modelo del registro (por defecto `vgg16`) |
+| `--model-file` | Ruta a un modelo guardado (`.keras`, `.h5` o SavedModel) |
+| `--weights` | `imagenet`, `none` o una ruta a pesos |
+| `--no-top` | Excluir las capas de clasificación |
+| `--input-source` | `webcam[:id]`, `file:<ruta>`, `directory:<ruta>`, `dataset:<cifar10\|mnist>` o `synthetic` |
+| `--input-size` | Tamaño `ANCHO ALTO`; por defecto el nativo del modelo |
+| `--gpu` | Usar GPU para los cálculos |
+| `--output-dir` | Directorio donde se guardan las visualizaciones |
+| `--list-models` | Listar los modelos disponibles y salir |
 
 ### Navegación por la interfaz
 
-La interfaz se divide en varias secciones:
+1. **Panel izquierdo**
+   - Imagen de entrada sin preprocesar
+   - Las tres clases más probables según el modelo
+   - Controles de capa, filtro y modo de visualización
 
-1. **Panel izquierdo**:
-   - Visualización de la imagen de entrada
-   - Controles para seleccionar capa y filtro
-   - Opciones de modo de visualización
+2. **Panel derecho**
+   - *Activaciones*: cuadrícula con los primeros 64 filtros de la capa
+   - *Filtros*: saliencia o retropropagación guiada del filtro seleccionado
+   - *Optimización*: imagen generada por ascenso de gradiente
+   - *Grad-CAM*: mapa de calor de la clase predicha sobre la imagen
 
-2. **Panel derecho**:
-   - Pestañas para diferentes visualizaciones:
-     - Activaciones: Muestra activaciones de todos los filtros
-     - Filtros: Visualiza gradientes o deconvolución para un filtro específico
-     - Optimización: Muestra imágenes generadas para maximizar activaciones
-     - CAM: Muestra mapas de activación de clase
+Al hacer clic en una celda de la cuadrícula de activaciones se selecciona ese filtro.
 
 ### Atajos de teclado
 
-- **Flechas izquierda/derecha**: Navegar entre imágenes
-- **Flechas arriba/abajo**: Navegar entre filtros
-- **H**: Mostrar ayuda
-- **Esc**: Cerrar la aplicación
+| Tecla | Acción |
+| --- | --- |
+| `←` / `→` | Imagen anterior / siguiente |
+| `↑` / `↓` | Filtro anterior / siguiente |
+| `S` | Guardar la vista actual en `--output-dir` |
+| `H` | Mostrar ayuda |
+| `Esc` | Cerrar la aplicación |
 
 ## Componentes principales
 
 ### ModelWrapper
 
-`ModelWrapper` es una clase que envuelve un modelo de TensorFlow y proporciona métodos para:
-
-- Obtener activaciones de cualquier capa
-- Calcular gradientes con respecto a cualquier capa
-- Realizar deconvolución
-- Optimizar imágenes para maximizar activaciones
+`ModelWrapper` envuelve un modelo de Keras y expone las operaciones de visualización. Los extractores de activaciones se crean bajo demanda y se cachean, de modo que envolver un modelo grande es inmediato.
 
 ```python
-from tf_vis.model_wrapper import ModelWrapper
-import tensorflow as tf
+import keras
 
-# Cargar modelo
-model = tf.keras.applications.VGG16()
+from tf_vis import ModelWrapper
 
-# Crear wrapper
-wrapper = ModelWrapper(model)
+wrapper = ModelWrapper(keras.applications.VGG16())
 
-# Obtener activaciones
-activations = wrapper.forward_pass(image, 'block3_conv1')
+# Introspección
+wrapper.visualizable_layers()          # capas con salida 2D o 4D
+wrapper.get_layer_info('block3_conv1') # nombre, tipo, forma, unidades, parámetros
+wrapper.num_filters('block3_conv1')    # 256
 
-# Calcular gradientes
-gradients = wrapper.compute_gradients(image, 'block3_conv1', filter_index=0)
+# Activaciones y gradientes
+activations = wrapper.forward_pass(image, 'block3_conv1')['block3_conv1']
+gradients = wrapper.compute_gradients(image, 'block3_conv1', filter_indices=0)
+saliency = wrapper.saliency_map(image, 'block3_conv1', filter_indices=0)
+guided = wrapper.guided_backprop(image, 'block3_conv1', filter_indices=0)
 ```
 
 ### InputFetcher
 
-`InputFetcher` gestiona la obtención de imágenes de diferentes fuentes:
-
-- Webcam
-- Archivos de imagen
-- Directorios de imágenes
-- Datasets de TensorFlow
+`InputFetcher` obtiene imágenes de distintas fuentes y las preprocesa para el modelo. Devuelve la imagen preprocesada y conserva la original en `current_raw_image`, para poder mostrarla sin los desplazamientos que introduce el preprocesamiento.
 
 ```python
-from tf_vis.input_fetcher import InputFetcher
+from tf_vis import InputFetcher
 
-# Crear fetcher para webcam
-webcam_fetcher = InputFetcher(input_source='webcam', target_size=(224, 224))
-
-# Crear fetcher para directorio
-dir_fetcher = InputFetcher(input_source='directory:/ruta/a/imagenes', target_size=(224, 224))
-
-# Obtener siguiente imagen
-image = fetcher.get_next_image()
+with InputFetcher(input_source='directory:./imagenes',
+                  preprocessing_function=preprocess,
+                  target_size=(224, 224)) as fetcher:
+    image = fetcher.get_next_image()   # preprocesada
+    original = fetcher.current_raw_image  # RGB uint8
 ```
+
+El tamaño objetivo se indica como `(ancho, alto)`, igual que en OpenCV.
 
 ### Visualización
 
-El módulo `visualization.py` contiene funciones para diferentes técnicas de visualización:
-
-- Visualización de activaciones
-- Visualización de filtros
-- Ascenso de gradiente para maximizar activaciones
-- Mapas de activación de clase (CAM)
+El módulo `tf_vis.visualization` reúne las técnicas que no dependen de la interfaz:
 
 ```python
-from tf_vis.visualization import apply_gradient_ascent, create_class_activation_map
+from tf_vis.visualization import (
+    apply_gradient_ascent,
+    create_class_activation_map,
+    display_activation_grid,
+    overlay_heatmap,
+    visualize_layer_filters,
+    visualize_max_activations,
+)
 
-# Generar imagen que maximiza un filtro
-optimized_image = apply_gradient_ascent(model_wrapper, 'block3_conv1', 0)
-
-# Crear mapa de activación de clase
-cam = create_class_activation_map(model_wrapper, image, 'block5_conv3', class_idx=242)
+optimized = apply_gradient_ascent(wrapper, 'block3_conv1', filter_index=0)
+cam = create_class_activation_map(wrapper, image, 'block5_conv3', class_idx=242)
+heatmap = overlay_heatmap(original, cam)
 ```
 
 ## Visualización de modelos personalizados
 
-Para visualizar tu propio modelo, necesitas:
+Desde la línea de comandos basta con `--model-file`:
 
-1. Cargar el modelo con TensorFlow
-2. Crear un `ModelWrapper` para el modelo
-3. Configurar un `InputFetcher` para la fuente de imágenes
-4. Iniciar la aplicación con estos componentes
+```bash
+tf-feature-vis --model-file ./mi_modelo.keras --input-source directory:./imagenes
+```
 
-### Ejemplo con modelo personalizado
+Desde Python se pueden ensamblar los componentes a mano:
 
 ```python
-import tensorflow as tf
-from tf_vis.model_wrapper import ModelWrapper
-from tf_vis.input_fetcher import InputFetcher
-from tf_vis.ui.main_window import MainWindow
-from PyQt5.QtWidgets import QApplication
 import sys
 
-# Cargar tu modelo personalizado
-model = tf.keras.models.load_model('mi_modelo.h5')
+import keras
+from PyQt6.QtWidgets import QApplication
 
-# Función de preprocesamiento personalizada (opcional)
-def preprocess(img):
-    return img / 255.0
+from tf_vis import InputFetcher, ModelWrapper
+from tf_vis.ui.main_window import MainWindow
 
-# Crear componentes
-model_wrapper = ModelWrapper(model)
+model = keras.models.load_model('mi_modelo.keras')
+
 input_fetcher = InputFetcher(
     input_source='directory:./mis_imagenes',
-    preprocessing_function=preprocess,
-    target_size=(224, 224)
+    preprocessing_function=lambda img: img / 255.0,
+    target_size=(224, 224),
 )
 
-# Iniciar aplicación
 app = QApplication(sys.argv)
-window = MainWindow(model_wrapper, input_fetcher)
-sys.exit(app.exec_())
+window = MainWindow(ModelWrapper(model), input_fetcher)
+sys.exit(app.exec())
 ```
+
+Requisitos del modelo:
+
+- Debe ser un modelo funcional o secuencial ya construido; los modelos subclasificados que nunca se han llamado no exponen tensores de entrada.
+- Las capas deben tener nombres únicos.
+- Para el ascenso de gradiente a cualquier resolución, cárgalo con `include_top=False`; con la cabeza puesta, la entrada tiene un tamaño fijo.
 
 ## Técnicas de visualización
 
-### Visualización de activaciones
+### Activaciones
 
-Muestra las activaciones de cada filtro en una capa específica cuando se procesa una imagen. Permite ver qué partes de la imagen activan cada filtro.
+Muestra la salida de cada filtro de una capa para la imagen actual. Revela qué partes de la imagen responden a cada detector.
 
-### Visualización de gradientes
+![Activaciones de block3_conv1 en VGG16](images/activations_grid.png)
 
-Calcula los gradientes de la activación de un filtro con respecto a la imagen de entrada. Esto muestra qué píxeles de la imagen tienen mayor influencia en la activación del filtro.
+*Generado con `python docs/generate_examples.py --model vgg16 --layer block3_conv1`. Unos filtros responden a los bordes del cuadrado y otros al patrón de franjas.*
 
-### Deconvolución
+### Mapas de saliencia
 
-Implementa la técnica de deconvolución propuesta por Zeiler & Fergus (2014), que proyecta las activaciones de vuelta al espacio de entrada para visualizar qué partes de la imagen activan un filtro específico.
+Gradiente de la activación respecto a los píxeles de entrada, tomando el máximo del valor absoluto sobre los canales de color (Simonyan et al., 2014). Se recorta el percentil 99 para que un único píxel extremo no oscurezca el resto del mapa.
+
+### Retropropagación guiada
+
+Variante de la deconvolución de Zeiler & Fergus propuesta por Springenberg et al. (2015): en cada ReLU se propagan hacia atrás únicamente los gradientes positivos que provienen de activaciones positivas. Produce visualizaciones mucho más nítidas que el gradiente en bruto.
+
+Se cubren las dos formas de declarar una ReLU en Keras: como argumento `activation` (VGG, InceptionV3) y como capa `ReLU` independiente (ResNet, MobileNet, EfficientNet).
 
 ### Optimización de características
 
-Genera imágenes que maximizan la activación de un filtro específico mediante ascenso de gradiente. Esto revela los patrones ideales que cada filtro busca.
+Genera por ascenso de gradiente una imagen que maximiza la activación de un filtro, revelando el patrón que ese filtro busca. Se descartan los bordes del mapa de características, dominados por el padding.
 
-### Mapas de activación de clase (CAM)
+### Grad-CAM
 
-Visualiza qué regiones de una imagen son importantes para la clasificación en una clase específica, superponiendo un mapa de calor sobre la imagen original.
+Pondera los mapas de características de una capa convolucional por el gradiente medio de la clase objetivo (Selvaraju et al., 2017). A diferencia del CAM original, no exige una arquitectura con *global average pooling* seguido de una única capa densa, por lo que funciona con cualquier modelo del registro.
 
 ## Referencia de API
 
-### tf_vis.model_wrapper.ModelWrapper
+### `tf_vis.model_wrapper.ModelWrapper`
 
-```python
-class ModelWrapper:
-    def __init__(self, model: tf.keras.Model):
-        """Inicializa el wrapper con un modelo TensorFlow."""
-        
-    def forward_pass(self, image: np.ndarray, layer_name: Optional[str] = None) -> Dict[str, np.ndarray]:
-        """Realiza un pase hacia adelante y devuelve las activaciones."""
-        
-    def compute_gradients(self, image: np.ndarray, layer_name: str, 
-                         filter_indices: Optional[Union[int, List[int]]] = None) -> np.ndarray:
-        """Calcula gradientes de la activación con respecto a la imagen de entrada."""
-        
-    def deconv(self, image: np.ndarray, layer_name: str, 
-              filter_indices: Optional[Union[int, List[int]]] = None) -> np.ndarray:
-        """Implementa deconvolución para visualizar qué partes de la imagen activan ciertos filtros."""
-        
-    def get_layer_info(self, layer_name: Optional[str] = None) -> Dict:
-        """Obtiene información sobre las capas del modelo."""
-```
+| Método | Descripción |
+| --- | --- |
+| `forward_pass(image, layer_name=None)` | Activaciones de una capa o de todas las visualizables |
+| `compute_gradients(image, layer_name, filter_indices=None)` | Gradiente respecto a la entrada |
+| `saliency_map(image, layer_name, filter_indices=None)` | Mapa de saliencia 2D en [0, 1] |
+| `guided_backprop(image, layer_name, filter_indices=None)` | Gradiente guiado |
+| `deconv(image, layer_name, filter_indices=None)` | Gradiente guiado listo para mostrar |
+| `get_activation_model(layer_name)` | Sub-modelo cacheado que produce la activación |
+| `get_layer_info(layer_name=None)` | Nombre, tipo, forma, unidades y parámetros |
+| `get_layer_shape(layer_name)` | Forma de salida, o `None` |
+| `num_filters(layer_name)` | Filtros o neuronas de la capa |
+| `is_spatial_layer(layer_name)` | Si la salida es un mapa de características |
+| `visualizable_layers()` | Capas con salida 2D o 4D |
+| `clear_cache()` | Libera los sub-modelos cacheados |
 
-### tf_vis.input_fetcher.InputFetcher
+### `tf_vis.input_fetcher.InputFetcher`
 
-```python
-class InputFetcher:
-    def __init__(self, input_source: str = 'webcam', 
-                preprocessing_function: Optional[callable] = None,
-                target_size: Tuple[int, int] = (224, 224)):
-        """Inicializa el fetcher de entrada."""
-        
-    def get_next_image(self) -> np.ndarray:
-        """Obtiene la siguiente imagen de la fuente."""
-        
-    def get_previous_image(self) -> np.ndarray:
-        """Obtiene la imagen anterior."""
-        
-    def get_specific_image(self, index: int) -> np.ndarray:
-        """Obtiene una imagen específica por índice."""
-        
-    def close(self):
-        """Libera recursos."""
-```
+| Miembro | Descripción |
+| --- | --- |
+| `get_next_image()` | Siguiente imagen, preprocesada |
+| `get_previous_image()` | Imagen anterior |
+| `get_current_image()` | Imagen actual sin avanzar el índice |
+| `get_specific_image(index)` | Imagen por índice |
+| `current_raw_image` | Última imagen RGB sin preprocesar |
+| `is_live` | Si la fuente es una webcam activa |
+| `len(fetcher)` | Número de imágenes (0 en fuentes en vivo) |
+| `close()` | Libera la cámara |
 
-### tf_vis.visualization
+### `tf_vis.visualization`
 
-```python
-def display_activation_grid(activations: np.ndarray, grid_size: Optional[Tuple[int, int]] = None, 
-                           padding: int = 1) -> np.ndarray:
-    """Organiza las activaciones en una cuadrícula para visualización."""
-    
-def visualize_layer_filters(model: tf.keras.Model, layer_name: str, 
-                           grid_size: Optional[Tuple[int, int]] = None) -> np.ndarray:
-    """Visualiza los filtros de una capa convolucional."""
-    
-def apply_gradient_ascent(model_wrapper, layer_name: str, filter_index: int, 
-                         iterations: int = 30, step_size: float = 1.0,
-                         image_size: Tuple[int, int] = (224, 224)) -> np.ndarray:
-    """Aplica ascenso de gradiente para generar una imagen que maximiza la activación."""
-    
-def visualize_max_activations(model_wrapper, dataset, layer_name: str, 
-                             n_top: int = 9, n_filters: Optional[int] = None) -> Dict:
-    """Encuentra las imágenes que causan las activaciones máximas para cada filtro."""
-    
-def create_class_activation_map(model_wrapper, img: np.ndarray, 
-                               layer_name: str, class_idx: int) -> np.ndarray:
-    """Crea un mapa de activación de clase (CAM)."""
-    
-def overlay_heatmap(img: np.ndarray, heatmap: np.ndarray, 
-                   alpha: float = 0.5, colormap: int = cv2.COLORMAP_JET) -> np.ndarray:
-    """Superpone un mapa de calor en una imagen."""
-```
+| Función | Descripción |
+| --- | --- |
+| `display_activation_grid(activations, grid_size=None, padding=1)` | Cuadrícula a partir de `[n_filtros, alto, ancho]` |
+| `visualize_layer_filters(model, layer_name, grid_size=None)` | Cuadrícula con los kernels de una capa |
+| `apply_gradient_ascent(wrapper, layer_name, filter_index, ...)` | Imagen que maximiza un filtro |
+| `visualize_max_activations(wrapper, dataset, layer_name, ...)` | Imágenes que más activan cada filtro |
+| `create_class_activation_map(wrapper, img, layer_name, class_idx)` | Grad-CAM |
+| `overlay_heatmap(img, heatmap, alpha=0.5, colormap=...)` | Superposición de un mapa de calor |
+| `normalize_01(array)` | Escalado a [0, 1] |
+| `standardize_for_display(array, spread=0.25)` | Normalización por contraste para gradientes |
+| `clip_outliers(array, percentile=99.0)` | Recorte de la cola superior |
+| `resolve_ascent_size(wrapper, image_size)` | Tamaño válido para el ascenso de gradiente |
+
+### `tf_vis.utils.misc`
+
+| Función | Descripción |
+| --- | --- |
+| `get_model_specs()` | Registro `nombre -> ModelSpec` |
+| `get_model_spec(name)` | Especificación de un modelo |
+| `load_model(name, weights='imagenet', include_top=True)` | Carga un modelo del registro |
+| `load_model_from_file(path)` | Carga un modelo de disco |
+| `get_preprocessing_function(name)` | Función de preprocesamiento del modelo |
+| `predict_image(model, img, top_k=5, model_name=None)` | Clases top-k con etiquetas |
+| `get_imagenet_labels()` | Las 1000 etiquetas en el orden de Keras |
+| `create_model_summary(model)` | Resumen serializable del modelo |
+| `save_visualizations(visualizations, output_dir, prefix='')` | Guarda PNG y devuelve las rutas |
+
+### `tf_vis.utils.layers`
+
+| Función | Descripción |
+| --- | --- |
+| `layer_output_shape(layer)` | Forma de salida compatible con Keras 3 |
+| `layer_num_units(layer)` | Filtros o neuronas de la capa |
+| `is_spatial_shape(shape)` | Si la forma es `[batch, alto, ancho, canales]` |
+| `describe_layer(layer)` | Resumen de la capa como diccionario |
 
 ## Solución de problemas
 
-### Problemas comunes
+### `AttributeError: 'Conv2D' object has no attribute 'output_shape'`
 
-#### La aplicación no inicia
+Estás mezclando código escrito para Keras 2 con Keras 3. Usa `tf_vis.utils.layers.layer_output_shape`, que funciona en ambas versiones.
 
-- Verifica que todas las dependencias estén instaladas correctamente
-- Comprueba que TensorFlow esté configurado adecuadamente
-- Si usas GPU, asegúrate de que CUDA y cuDNN estén instalados correctamente
+### `ImportError: libEGL.so.1: cannot open shared object file`
 
-#### Rendimiento lento
+Faltan las bibliotecas de sistema de Qt. En Debian o Ubuntu:
 
-- Considera usar la opción `--gpu` para acelerar los cálculos
-- Reduce el tamaño de entrada con `--input-size`
-- Limita la visualización a capas específicas
+```bash
+sudo apt-get install libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0
+```
 
-#### Errores con modelos personalizados
+Para ejecutar sin servidor gráfico, exporta `QT_QPA_PLATFORM=offscreen`.
 
-- Asegúrate de que el modelo sea compatible con TensorFlow 2.x
-- Verifica que todas las capas tengan nombres únicos
-- Proporciona una función de preprocesamiento adecuada
+### La webcam no se abre
 
-### Obtener ayuda
+La aplicación avisa por consola y cambia a imágenes sintéticas. Para forzar otra cámara usa `--input-source webcam:1`, y para trabajar con archivos `--input-source directory:./imagenes`.
 
-Si encuentras problemas o tienes preguntas:
+### `El modelo espera entradas de NxN`
 
-1. Consulta la [documentación completa](https://github.com/tu-usuario/tf-feature-vis/docs)
-2. Revisa los [problemas conocidos](https://github.com/tu-usuario/tf-feature-vis/issues)
-3. Abre un nuevo issue en GitHub con detalles sobre tu problema
+El ascenso de gradiente necesita generar una imagen del tamaño de entrada del modelo. Los modelos con `include_top=True` fijan esa resolución; carga el modelo con `--no-top` para poder usar cualquier tamaño.
+
+### Rendimiento lento
+
+- Usa `--gpu` si tienes una GPU configurada.
+- Reduce la resolución con `--input-size`.
+- Los modos de optimización y Grad-CAM son los más costosos; el de activaciones es el más ligero.
+- Con `--model-file` sobre modelos grandes, las primeras iteraciones incluyen la compilación del grafo.
+
+### Errores con modelos personalizados
+
+- El modelo debe estar construido y exponer tensores de entrada.
+- Las capas deben tener nombres únicos.
+- Proporciona una función de preprocesamiento acorde al entrenamiento del modelo.
+
+## Obtener ayuda
+
+1. Revisa los [problemas conocidos](https://github.com/Sastiazaran/DeepVisualizationToolbox/issues).
+2. Abre un nuevo issue con la versión de Python, TensorFlow y el traceback completo.

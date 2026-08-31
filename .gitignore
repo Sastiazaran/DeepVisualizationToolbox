@@ -110,3 +110,9 @@ venv.bak/
 # Project specific
 visualizations/
 models/*.h5
+
+# Entornos virtuales locales
+.venv/
+
+# Imágenes de prueba generadas automáticamente
+input_images/

@@ -2,256 +2,199 @@
 Utilidades para procesamiento de imágenes.
 """
 
-import numpy as np
+from __future__ import annotations
+
+from collections.abc import Callable
+
 import cv2
-from typing import Tuple, List, Optional, Union
-from PIL import Image
+import keras
+import numpy as np
 import tensorflow as tf
 
+# Media BGR que resta el preprocesamiento estilo Caffe (VGG16, VGG19, ResNet50).
+_CAFFE_MEAN = np.array([103.939, 116.779, 123.68], dtype=np.float32)
+_CAFFE_MODELS = {'vgg16', 'vgg19', 'resnet50'}
+_TF_SCALED_MODELS = {'inception_v3', 'mobilenet', 'mobilenet_v2', 'efficientnetv2_b0'}
 
-def load_image(path: str, target_size: Optional[Tuple[int, int]] = None, 
-              preprocess_fn: Optional[callable] = None) -> np.ndarray:
+
+def load_image(path: str, target_size: tuple[int, int] | None = None,
+               preprocess_fn: Callable[[np.ndarray], np.ndarray] | None = None) -> np.ndarray:
     """
-    Carga una imagen desde un archivo.
-    
+    Carga una imagen desde un archivo en formato RGB.
+
     Args:
         path: Ruta al archivo de imagen
         target_size: Tamaño objetivo (ancho, alto)
         preprocess_fn: Función de preprocesamiento opcional
-        
+
     Returns:
-        Imagen como array numpy
+        Imagen como array numpy RGB
     """
-    # Cargar imagen
-    img = cv2.imread(path)
+    img = cv2.imread(path, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError(f"No se pudo cargar la imagen: {path}")
-    
-    # Convertir de BGR a RGB
+
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    
-    # Redimensionar si se especifica un tamaño
+
     if target_size:
-        img = cv2.resize(img, target_size)
-    
-    # Aplicar preprocesamiento si se proporciona
+        img = cv2.resize(img, target_size, interpolation=cv2.INTER_AREA)
+
     if preprocess_fn:
         img = preprocess_fn(img)
-    
+
     return img
 
 
 def preprocess_image_for_model(img: np.ndarray, model_name: str) -> np.ndarray:
     """
-    Preprocesa una imagen para un modelo específico.
-    
+    Preprocesa una imagen para un modelo concreto del registro.
+
     Args:
-        img: Imagen como array numpy
+        img: Imagen RGB como array numpy
         model_name: Nombre del modelo ('vgg16', 'resnet50', etc.)
-        
+
     Returns:
         Imagen preprocesada
     """
-    # Asegurar que la imagen tiene 3 canales
-    if len(img.shape) == 2:
-        img = np.stack([img, img, img], axis=-1)
-    
-    # Preprocesamiento específico del modelo
-    if model_name.lower() == 'vgg16':
-        # VGG16 espera valores en [0, 255] y luego resta la media RGB
-        from tensorflow.keras.applications.vgg16 import preprocess_input
-        return preprocess_input(img.copy())
-    
-    elif model_name.lower() == 'resnet50':
-        # ResNet50 espera valores en [0, 255] y luego normaliza con media/std de ImageNet
-        from tensorflow.keras.applications.resnet50 import preprocess_input
-        return preprocess_input(img.copy())
-    
-    elif model_name.lower() == 'inception_v3':
-        # InceptionV3 espera valores en [-1, 1]
-        from tensorflow.keras.applications.inception_v3 import preprocess_input
-        return preprocess_input(img.copy())
-    
-    elif model_name.lower() == 'mobilenet':
-        # MobileNet espera valores en [-1, 1]
-        from tensorflow.keras.applications.mobilenet import preprocess_input
-        return preprocess_input(img.copy())
-    
-    else:
-        # Preprocesamiento genérico: normalizar a [0, 1]
+    if img.ndim == 2:
+        img = np.stack([img] * 3, axis=-1)
+
+    # Importación diferida para evitar un ciclo entre utils.misc y utils.image_utils.
+    from .misc import get_model_spec
+
+    try:
+        spec = get_model_spec(model_name)
+    except ValueError:
         return img.astype(np.float32) / 255.0
 
+    return spec.preprocess(np.array(img, dtype=np.float32, copy=True))
 
-def deprocess_image(img: np.ndarray, model_name: str = None) -> np.ndarray:
+
+def deprocess_image(img: np.ndarray, model_name: str | None = None) -> np.ndarray:
     """
-    Convierte una imagen preprocesada de vuelta a formato visualizable.
-    
+    Convierte una imagen preprocesada de vuelta a un formato visualizable.
+
     Args:
         img: Imagen preprocesada
         model_name: Nombre del modelo (opcional)
-        
+
     Returns:
-        Imagen en formato visualizable (valores en [0, 1])
+        Imagen con valores en [0, 1]
     """
-    # Si no se especifica modelo, asumir valores en [0, 1]
+    img = np.asarray(img, dtype=np.float32)
+
     if model_name is None:
         return np.clip(img, 0, 1)
-    
-    # Deshacer preprocesamiento específico del modelo
-    if model_name.lower() == 'vgg16':
-        # Deshacer resta de media
-        mean = [103.939, 116.779, 123.68]
-        img = img.copy()
-        
-        # Convertir de BGR a RGB
-        img = img[..., ::-1]
-        
-        # Añadir media
-        for i in range(3):
-            img[..., i] += mean[i]
-        
-        # Normalizar a [0, 1]
-        return np.clip(img / 255.0, 0, 1)
-    
-    elif model_name.lower() in ['inception_v3', 'mobilenet']:
-        # Convertir de [-1, 1] a [0, 1]
-        return np.clip((img + 1) / 2.0, 0, 1)
-    
-    else:
-        # Normalizar a [0, 1]
-        return np.clip(img, 0, 1)
+
+    key = model_name.lower().replace('-', '_')
+
+    if key in _CAFFE_MODELS:
+        restored = img.copy() + _CAFFE_MEAN  # el preprocesado deja los canales en BGR
+        restored = restored[..., ::-1]
+        return np.clip(restored / 255.0, 0, 1)
+
+    if key in _TF_SCALED_MODELS:
+        return np.clip((img + 1.0) / 2.0, 0, 1)
+
+    return np.clip(img, 0, 1)
 
 
-def apply_gradcam(model: tf.keras.Model, img: np.ndarray, 
-                 layer_name: str, class_idx: int) -> np.ndarray:
+def apply_gradcam(model: keras.Model, img: np.ndarray,
+                  layer_name: str, class_idx: int | None = None) -> np.ndarray:
     """
-    Aplica Grad-CAM para visualizar qué partes de la imagen son importantes.
-    
+    Aplica Grad-CAM para localizar las regiones que sustentan una predicción.
+
     Args:
-        model: Modelo TensorFlow
-        img: Imagen de entrada
-        layer_name: Nombre de la capa para Grad-CAM
-        class_idx: Índice de la clase a visualizar
-        
+        model: Modelo de Keras
+        img: Imagen de entrada, ya preprocesada
+        layer_name: Nombre de la capa convolucional a explicar
+        class_idx: Índice de la clase; `None` usa la clase predicha
+
     Returns:
-        Mapa de calor Grad-CAM
+        Mapa de calor 2D normalizado a [0, 1]
     """
-    # Crear modelo que devuelve tanto la predicción como las activaciones
-    grad_model = tf.keras.models.Model(
-        inputs=[model.inputs],
-        outputs=[model.get_layer(layer_name).output, model.output]
+    batch = np.asarray(img, dtype=np.float32)
+    if batch.ndim == 3:
+        batch = np.expand_dims(batch, axis=0)
+
+    # Un modelo de una sola entrada debe declararse con el tensor suelto; con una
+    # lista de uno Keras avisa de que la estructura del lote no coincide.
+    inputs = model.inputs[0] if len(model.inputs) == 1 else model.inputs
+    grad_model = keras.Model(
+        inputs=inputs,
+        outputs=[model.get_layer(layer_name).output, model.outputs[0]],
     )
-    
-    # Asegurar que la imagen tiene la forma correcta
-    if len(img.shape) == 3:
-        img = np.expand_dims(img, axis=0)
-    
-    # Registrar operaciones para el cálculo de gradientes
+
     with tf.GradientTape() as tape:
-        # Ejecutar pase hacia adelante
-        conv_outputs, predictions = grad_model(img)
-        
-        # Obtener pérdida para la clase objetivo
-        loss = predictions[:, class_idx]
-    
-    # Calcular gradientes
+        conv_outputs, predictions = grad_model(batch, training=False)
+        target_idx = int(tf.argmax(predictions[0])) if class_idx is None else class_idx
+        loss = predictions[:, target_idx]
+
     grads = tape.gradient(loss, conv_outputs)
-    
-    # Calcular pesos de importancia
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-    
-    # Multiplicar cada canal por su peso de importancia
-    conv_outputs = conv_outputs[0]
-    heatmap = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs), axis=-1)
-    
-    # Aplicar ReLU
-    heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
-    
-    # Convertir a numpy
-    heatmap = heatmap.numpy()
-    
-    return heatmap
+    if grads is None:
+        raise ValueError(f"No se pudieron calcular gradientes para la capa '{layer_name}'")
+
+    pooled_grads = tf.reduce_mean(grads, axis=(1, 2))
+    heatmap = tf.reduce_sum(conv_outputs[0] * pooled_grads[0], axis=-1)
+    heatmap = tf.nn.relu(heatmap).numpy()
+
+    # La división directa por el máximo produce NaN cuando el mapa es todo cero.
+    maximum = float(np.max(heatmap))
+    return heatmap / maximum if maximum > 0 else heatmap
 
 
 def overlay_gradcam(img: np.ndarray, heatmap: np.ndarray, alpha: float = 0.4) -> np.ndarray:
     """
-    Superpone un mapa de calor Grad-CAM en una imagen.
-    
+    Superpone un mapa de calor Grad-CAM sobre una imagen.
+
     Args:
         img: Imagen original
-        heatmap: Mapa de calor Grad-CAM
+        heatmap: Mapa de calor Grad-CAM en [0, 1]
         alpha: Factor de mezcla
-        
+
     Returns:
-        Imagen con mapa de calor superpuesto
+        Imagen `uint8` con el mapa de calor superpuesto
     """
-    # Redimensionar mapa de calor al tamaño de la imagen
-    heatmap = cv2.resize(heatmap, (img.shape[1], img.shape[0]))
-    
-    # Convertir a mapa de colores
-    heatmap = np.uint8(255 * heatmap)
-    heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-    
-    # Asegurar que img está en formato uint8 con rango [0, 255]
-    if img.dtype != np.uint8:
-        img = np.clip(img * 255, 0, 255).astype(np.uint8)
-    
-    # Superponer mapa de calor
-    superimposed = cv2.addWeighted(img, 1 - alpha, heatmap, alpha, 0)
-    
-    return superimposed
+    from ..visualization import overlay_heatmap
+
+    return overlay_heatmap(img, heatmap, alpha=alpha)
 
 
-def create_grid_of_images(images: List[np.ndarray], grid_size: Optional[Tuple[int, int]] = None,
-                         padding: int = 1) -> np.ndarray:
+def create_grid_of_images(images: list[np.ndarray], grid_size: tuple[int, int] | None = None,
+                          padding: int = 1) -> np.ndarray:
     """
-    Crea una cuadrícula de imágenes.
-    
+    Crea una cuadrícula con una lista de imágenes del mismo tamaño.
+
     Args:
         images: Lista de imágenes
         grid_size: Tamaño de la cuadrícula (filas, columnas)
         padding: Píxeles de padding entre imágenes
-        
+
     Returns:
         Imagen con la cuadrícula
     """
+    if not images:
+        raise ValueError("Se necesita al menos una imagen para crear la cuadrícula")
+
     n_images = len(images)
-    
-    # Determinar tamaño de cuadrícula si no se proporciona
-    if grid_size is None:
-        grid_size = (int(np.ceil(np.sqrt(n_images))), int(np.ceil(np.sqrt(n_images))))
-    
-    # Asegurarse de que la cuadrícula puede contener todas las imágenes
-    if grid_size[0] * grid_size[1] < n_images:
-        grid_size = (int(np.ceil(np.sqrt(n_images))), int(np.ceil(np.sqrt(n_images))))
-    
-    # Determinar tamaño de imagen
+
+    if grid_size is None or grid_size[0] * grid_size[1] < n_images:
+        side = int(np.ceil(np.sqrt(n_images)))
+        grid_size = (side, side)
+
     h, w = images[0].shape[:2]
-    
-    # Crear imagen de cuadrícula
     grid_h = grid_size[0] * h + (grid_size[0] - 1) * padding
     grid_w = grid_size[1] * w + (grid_size[1] - 1) * padding
-    
-    # Determinar número de canales
-    if len(images[0].shape) == 3:
-        channels = images[0].shape[2]
-        grid = np.zeros((grid_h, grid_w, channels), dtype=images[0].dtype)
+
+    if images[0].ndim == 3:
+        grid = np.zeros((grid_h, grid_w, images[0].shape[2]), dtype=images[0].dtype)
     else:
         grid = np.zeros((grid_h, grid_w), dtype=images[0].dtype)
-    
-    # Llenar la cuadrícula con imágenes
+
     for i in range(min(n_images, grid_size[0] * grid_size[1])):
-        row = i // grid_size[1]
-        col = i % grid_size[1]
-        
-        # Calcular posición en la cuadrícula
+        row, col = divmod(i, grid_size[1])
         y = row * (h + padding)
         x = col * (w + padding)
-        
-        # Colocar imagen en la cuadrícula
-        if len(images[i].shape) == 3:
-            grid[y:y+h, x:x+w, :] = images[i]
-        else:
-            grid[y:y+h, x:x+w] = images[i]
-    
+        grid[y:y + h, x:x + w] = images[i]
+
     return grid

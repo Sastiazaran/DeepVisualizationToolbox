@@ -2,125 +2,119 @@
 Aplicación principal para la visualización de características de redes neuronales.
 """
 
+from __future__ import annotations
+
+import argparse
 import os
 import sys
-import argparse
-import tensorflow as tf
-import numpy as np
-import cv2
-from PyQt5.QtWidgets import QApplication
-
-from .model_wrapper import ModelWrapper
-from .input_fetcher import InputFetcher
-from .ui.main_window import MainWindow
-from .utils.misc import load_model, get_available_models
 
 
-def parse_args():
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Analiza los argumentos de línea de comandos."""
-    parser = argparse.ArgumentParser(description='TensorFlow Feature Visualization Toolbox')
-    
-    # Argumentos para el modelo
-    parser.add_argument('--model', type=str, default='vgg16',
-                       help='Modelo a utilizar (vgg16, resnet50, etc.)')
-    parser.add_argument('--weights', type=str, default='imagenet',
-                       help='Pesos a utilizar (imagenet o ruta a archivo)')
-    parser.add_argument('--include-top', action='store_true', default=True,
-                       help='Incluir capas de clasificación')
-    
-    # Argumentos para la entrada
-    parser.add_argument('--input-source', type=str, default='webcam',
-                       help='Fuente de entrada (webcam, directory:path, file:path, dataset:name)')
-    parser.add_argument('--input-size', type=int, nargs=2, default=[224, 224],
-                       help='Tamaño de entrada (ancho, alto)')
-    
-    # Argumentos para la visualización
-    parser.add_argument('--gpu', action='store_true',
-                       help='Usar GPU para cálculos')
-    
-    return parser.parse_args()
+    parser = argparse.ArgumentParser(
+        prog='tf-feature-vis',
+        description='TensorFlow Feature Visualization Toolbox',
+    )
+
+    model_group = parser.add_argument_group('modelo')
+    model_group.add_argument('--model', type=str, default='vgg16',
+                             help='Modelo del registro a utilizar (por defecto: vgg16)')
+    model_group.add_argument('--model-file', type=str, default=None,
+                             help='Ruta a un modelo guardado (.keras, .h5 o SavedModel); '
+                                  'tiene prioridad sobre --model')
+    model_group.add_argument('--weights', type=str, default='imagenet',
+                             help="Pesos a utilizar ('imagenet', 'none' o una ruta)")
+    model_group.add_argument('--no-top', dest='include_top', action='store_false',
+                             help='Excluir las capas de clasificación')
+    model_group.set_defaults(include_top=True)
+
+    input_group = parser.add_argument_group('entrada')
+    input_group.add_argument('--input-source', type=str, default='webcam',
+                             help='webcam[:id], file:<ruta>, directory:<ruta>, '
+                                  'dataset:<cifar10|mnist> o synthetic')
+    input_group.add_argument('--input-size', type=int, nargs=2, default=None,
+                             metavar=('ANCHO', 'ALTO'),
+                             help='Tamaño de entrada; por defecto el nativo del modelo')
+
+    misc_group = parser.add_argument_group('varios')
+    misc_group.add_argument('--gpu', action='store_true', help='Usar GPU para los cálculos')
+    misc_group.add_argument('--output-dir', type=str, default='visualizations',
+                            help='Directorio donde se guardan las visualizaciones')
+    misc_group.add_argument('--list-models', action='store_true',
+                            help='Listar los modelos disponibles y salir')
+
+    return parser.parse_args(argv)
 
 
-def main():
-    """Función principal de la aplicación."""
-    # Analizar argumentos
-    args = parse_args()
-    
-    # Configurar GPU/CPU
-    if not args.gpu:
-        print("Ejecutando en CPU (use --gpu para habilitar GPU)")
-        os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-    
-    # Cargar modelo
+def _configure_devices(use_gpu: bool) -> None:
+    """Configura la visibilidad de la GPU antes de importar TensorFlow."""
+    if not use_gpu:
+        # Debe hacerse antes de importar TensorFlow para que surta efecto.
+        os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+        print("Ejecutando en CPU (usa --gpu para habilitar la GPU)")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Punto de entrada de la aplicación."""
+    args = parse_args(argv)
+    _configure_devices(args.gpu)
+
+    from .utils.misc import get_model_spec, get_model_specs, load_model_from_file
+
+    if args.list_models:
+        for name, spec in sorted(get_model_specs().items()):
+            print(f"{name:<20} entrada {spec.input_shape}")
+        return 0
+
     try:
-        print(f"Cargando modelo {args.model}...")
-        model = load_model(args.model, weights=args.weights, include_top=args.include_top)
+        if args.model_file:
+            print(f"Cargando modelo desde {args.model_file}...")
+            model = load_model_from_file(args.model_file)
+            preprocess_fn = None
+            model_name = None
+            default_size = None
+        else:
+            print(f"Cargando modelo {args.model}...")
+            weights = None if args.weights.lower() == 'none' else args.weights
+            spec = get_model_spec(args.model)
+            model = spec.constructor(weights=weights, include_top=args.include_top)
+            preprocess_fn = spec.preprocess
+            model_name = args.model
+            default_size = (spec.input_shape[1], spec.input_shape[0])
         print("Modelo cargado correctamente")
-    except Exception as e:
-        print(f"Error al cargar el modelo: {e}")
-        available_models = get_available_models()
-        print(f"Modelos disponibles: {list(available_models.keys())}")
-        sys.exit(1)
-    
-    # Crear wrapper del modelo
+    except (ValueError, OSError) as error:
+        print(f"Error al cargar el modelo: {error}")
+        print(f"Modelos disponibles: {sorted(get_model_specs())}")
+        return 1
+
+    from .input_fetcher import InputFetcher
+    from .model_wrapper import ModelWrapper
+
     model_wrapper = ModelWrapper(model)
-    
-    # Crear fetcher de entrada
+
+    input_size = tuple(args.input_size) if args.input_size else (default_size or (224, 224))
+
     try:
-        # Obtener función de preprocesamiento para el modelo
-        available_models = get_available_models()
-        preprocess_fn = available_models[args.model.lower()]['preprocess']
-        
-        # Modificar la fuente de entrada si se especificó webcam pero no hay acceso
-        input_source = args.input_source
-        if input_source == 'webcam':
-            # Verificar si podemos acceder a la webcam
-            try:
-                cap = cv2.VideoCapture(0)
-                if not cap.isOpened():
-                    print("No se pudo acceder a la webcam, usando imágenes de prueba")
-                    # Crear directorio temporal para imágenes de prueba si no existe
-                    if not os.path.exists('input_images'):
-                        os.makedirs('input_images')
-                    # Crear algunas imágenes de prueba
-                    for i in range(5):
-                        img = np.random.random((args.input_size[1], args.input_size[0], 3))
-                        img = (img * 255).astype(np.uint8)
-                        cv2.imwrite(f'input_images/test_{i}.jpg', img)
-                    input_source = 'directory:input_images'
-                cap.release()
-            except Exception as e:
-                print(f"Error al verificar webcam: {e}, usando imágenes de prueba")
-                # Crear directorio temporal para imágenes de prueba si no existe
-                if not os.path.exists('input_images'):
-                    os.makedirs('input_images')
-                # Crear algunas imágenes de prueba
-                for i in range(5):
-                    img = np.random.random((args.input_size[1], args.input_size[0], 3))
-                    img = (img * 255).astype(np.uint8)
-                    cv2.imwrite(f'input_images/test_{i}.jpg', img)
-                input_source = 'directory:input_images'
-        
-        # Crear fetcher
         input_fetcher = InputFetcher(
-            input_source=input_source,
+            input_source=args.input_source,
             preprocessing_function=preprocess_fn,
-            target_size=tuple(args.input_size)
+            target_size=input_size,
         )
-        print(f"Fuente de entrada configurada: {input_source}")
-    except Exception as e:
-        print(f"Error al configurar la fuente de entrada: {e}")
-        sys.exit(1)
-    
-    # Iniciar aplicación Qt
-    app = QApplication(sys.argv)
-    
-    # Crear ventana principal
-    window = MainWindow(model_wrapper, input_fetcher)
-    
-    # Ejecutar aplicación
-    sys.exit(app.exec_())
+        print(f"Fuente de entrada configurada: {args.input_source} {input_size}")
+    except ValueError as error:
+        print(f"Error al configurar la fuente de entrada: {error}")
+        return 1
+
+    from PyQt6.QtWidgets import QApplication
+
+    from .ui.main_window import MainWindow
+
+    app = QApplication(sys.argv[:1])
+    window = MainWindow(model_wrapper, input_fetcher, model_name=model_name,
+                        output_dir=args.output_dir)
+    window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

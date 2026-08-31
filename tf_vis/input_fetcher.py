@@ -2,303 +2,244 @@
 Módulo para cargar y preprocesar imágenes de diferentes fuentes.
 """
 
+from __future__ import annotations
+
 import os
-import numpy as np
+from collections.abc import Callable
+
 import cv2
-from typing import List, Tuple, Optional, Union, Dict, Any
-import tensorflow as tf
-from PIL import Image
+import numpy as np
+
+VALID_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff')
 
 
 class InputFetcher:
     """
-    Clase para cargar imágenes de diferentes fuentes:
-    - Archivos de imagen
-    - Directorio de imágenes
-    - Webcam
-    - Dataset de TensorFlow
+    Carga imágenes RGB desde distintas fuentes y las preprocesa para el modelo.
+
+    Fuentes admitidas (indicadas mediante la cadena `input_source`):
+
+    - ``webcam`` o ``webcam:<id>``: captura desde una cámara
+    - ``file:<ruta>``: una sola imagen
+    - ``directory:<ruta>``: todas las imágenes de un directorio
+    - ``dataset:<nombre>``: ``cifar10`` o ``mnist``
+    - ``synthetic``: ruido determinista, útil sin cámara ni imágenes en disco
+
+    Cada llamada devuelve la imagen preprocesada, mientras que la versión RGB
+    original queda accesible en :attr:`current_raw_image` para poder mostrarla
+    en pantalla sin los desplazamientos que introduce el preprocesamiento.
     """
-    
-    def __init__(self, input_source: str = 'webcam', 
-                preprocessing_function: Optional[callable] = None,
-                target_size: Tuple[int, int] = (224, 224)):
+
+    def __init__(self, input_source: str = 'webcam',
+                 preprocessing_function: Callable[[np.ndarray], np.ndarray] | None = None,
+                 target_size: tuple[int, int] = (224, 224)):
         """
         Inicializa el fetcher de entrada.
-        
+
         Args:
-            input_source: Fuente de entrada ('webcam', 'directory', 'file', 'dataset')
+            input_source: Fuente de entrada
             preprocessing_function: Función de preprocesamiento opcional
-            target_size: Tamaño objetivo para las imágenes
+            target_size: Tamaño objetivo `(ancho, alto)`
         """
         self.input_source = input_source
         self.preprocessing_function = preprocessing_function
-        self.target_size = target_size
+        self.target_size = tuple(target_size)
         self.current_index = 0
-        self.images = []
-        self.image_paths = []
+        self.image_paths: list[str] = []
+        self.images: np.ndarray | None = None
         self.webcam = None
-        self.dataset = None
-        
-        # Inicializar la fuente de entrada
+        self.current_raw_image: np.ndarray | None = None
+
+        self.kind, _, self.argument = input_source.partition(':')
         self._initialize_source()
-    
-    def _initialize_source(self):
-        """Inicializa la fuente de entrada según el tipo."""
-        if self.input_source == 'webcam':
-            self._initialize_webcam()
-        elif self.input_source.startswith('directory:'):
-            directory = self.input_source.split(':', 1)[1]
-            self._load_directory(directory)
-        elif self.input_source.startswith('file:'):
-            file_path = self.input_source.split(':', 1)[1]
-            self._load_file(file_path)
-        elif self.input_source.startswith('dataset:'):
-            dataset_name = self.input_source.split(':', 1)[1]
-            self._load_dataset(dataset_name)
-    
-    def _initialize_webcam(self, device_id: int = 0):
-        """Inicializa la webcam."""
+
+    # ------------------------------------------------------------------
+    # Inicialización
+    # ------------------------------------------------------------------
+    def _initialize_source(self) -> None:
+        """Inicializa la fuente de entrada según su tipo."""
+        if self.kind == 'webcam':
+            self._initialize_webcam(int(self.argument) if self.argument else 0)
+        elif self.kind == 'directory':
+            self._load_directory(self.argument)
+        elif self.kind == 'file':
+            self._load_file(self.argument)
+        elif self.kind == 'dataset':
+            self._load_dataset(self.argument)
+        elif self.kind == 'synthetic':
+            self.images = self._synthetic_images()
+        else:
+            raise ValueError(
+                f"Fuente de entrada no válida: '{self.input_source}'. Usa webcam, "
+                "file:<ruta>, directory:<ruta>, dataset:<nombre> o synthetic."
+            )
+
+    @property
+    def is_live(self) -> bool:
+        """Indica si la fuente produce imágenes nuevas continuamente."""
+        return self.kind == 'webcam' and self.webcam is not None
+
+    def _synthetic_images(self, count: int = 5) -> np.ndarray:
+        """Genera imágenes de ruido reproducibles como fuente de reserva."""
+        width, height = self.target_size
+        rng = np.random.default_rng(0)
+        return (rng.random((count, height, width, 3)) * 255).astype(np.uint8)
+
+    def _initialize_webcam(self, device_id: int = 0) -> None:
+        """Abre la webcam, cayendo a imágenes sintéticas si no está disponible."""
         try:
-            self.webcam = cv2.VideoCapture(device_id)
-            if not self.webcam.isOpened():
-                print(f"Advertencia: No se pudo abrir la webcam con ID {device_id}")
-                # Crear una imagen de prueba en lugar de usar la webcam
-                self.use_test_image = True
-                self.test_image = np.random.random((self.target_size[1], self.target_size[0], 3))
-                self.test_image = (self.test_image * 255).astype(np.uint8)
-            else:
-                self.use_test_image = False
-        except Exception as e:
-            print(f"Error al inicializar webcam: {e}")
-            # Crear una imagen de prueba en lugar de usar la webcam
-            self.use_test_image = True
-            self.test_image = np.random.random((self.target_size[1], self.target_size[0], 3))
-            self.test_image = (self.test_image * 255).astype(np.uint8)
-    
-    def _load_directory(self, directory: str):
-        """Carga imágenes desde un directorio."""
+            webcam = cv2.VideoCapture(device_id)
+        except cv2.error as error:
+            print(f"Error al inicializar la webcam: {error}. Usando imágenes sintéticas.")
+            webcam = None
+
+        if webcam is not None and webcam.isOpened():
+            self.webcam = webcam
+            return
+
+        if webcam is not None:
+            webcam.release()
+        print(f"Advertencia: no se pudo abrir la webcam {device_id}. Usando imágenes sintéticas.")
+        self.images = self._synthetic_images()
+
+    def _load_directory(self, directory: str) -> None:
+        """Carga las rutas de las imágenes de un directorio."""
         if not os.path.isdir(directory):
             raise ValueError(f"El directorio {directory} no existe")
-        
-        # Obtener todas las imágenes en el directorio
-        valid_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.gif')
-        self.image_paths = [
-            os.path.join(directory, f) for f in os.listdir(directory)
-            if f.lower().endswith(valid_extensions)
-        ]
-        
+
+        self.image_paths = sorted(
+            os.path.join(directory, name)
+            for name in os.listdir(directory)
+            if name.lower().endswith(VALID_EXTENSIONS)
+        )
+
         if not self.image_paths:
             raise ValueError(f"No se encontraron imágenes en {directory}")
-        
-        # Precargar la primera imagen
-        self._load_image_at_index(0)
-    
-    def _load_file(self, file_path: str):
-        """Carga una imagen desde un archivo."""
+
+    def _load_file(self, file_path: str) -> None:
+        """Registra una única imagen como fuente."""
         if not os.path.isfile(file_path):
             raise ValueError(f"El archivo {file_path} no existe")
-        
         self.image_paths = [file_path]
-        self._load_image_at_index(0)
-    
-    def _load_dataset(self, dataset_name: str):
-        """Carga un dataset de TensorFlow."""
-        # Implementar carga de datasets comunes
+
+    def _load_dataset(self, dataset_name: str) -> None:
+        """Carga un dataset incluido en Keras."""
+        import keras
+
         if dataset_name == 'cifar10':
-            (x_train, _), _ = tf.keras.datasets.cifar10.load_data()
+            (x_train, _), _ = keras.datasets.cifar10.load_data()
             self.images = x_train
         elif dataset_name == 'mnist':
-            (x_train, _), _ = tf.keras.datasets.mnist.load_data()
-            # Convertir a RGB
-            x_rgb = np.zeros((x_train.shape[0], x_train.shape[1], x_train.shape[2], 3), dtype=np.uint8)
-            for i in range(x_train.shape[0]):
-                x_rgb[i] = cv2.cvtColor(x_train[i], cv2.COLOR_GRAY2RGB)
-            self.images = x_rgb
+            (x_train, _), _ = keras.datasets.mnist.load_data()
+            self.images = np.repeat(x_train[..., np.newaxis], 3, axis=-1)
         else:
-            raise ValueError(f"Dataset {dataset_name} no soportado")
-    
-    def _load_image_at_index(self, index: int):
-        """Carga la imagen en el índice especificado."""
-        if 0 <= index < len(self.image_paths):
-            img_path = self.image_paths[index]
-            img = cv2.imread(img_path)
-            if img is None:
-                raise ValueError(f"No se pudo cargar la imagen {img_path}")
-            
-            # Convertir de BGR a RGB
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            
-            # Redimensionar
-            img = cv2.resize(img, self.target_size)
-            
-            self.current_index = index
-            self.current_image = img
-    
+            raise ValueError(f"Dataset {dataset_name} no soportado (usa cifar10 o mnist)")
+
+    # ------------------------------------------------------------------
+    # Acceso a imágenes
+    # ------------------------------------------------------------------
+    def __len__(self) -> int:
+        """Número de imágenes disponibles (0 para fuentes en vivo)."""
+        if self.image_paths:
+            return len(self.image_paths)
+        if self.images is not None:
+            return len(self.images)
+        return 0
+
     def get_next_image(self) -> np.ndarray:
-        """
-        Obtiene la siguiente imagen de la fuente.
-        
-        Returns:
-            Imagen como array numpy
-        """
-        if self.input_source == 'webcam':
-            return self._get_webcam_frame()
-        elif self.input_source.startswith('directory:') or self.input_source.startswith('file:'):
-            return self._get_next_file_image()
-        elif self.input_source.startswith('dataset:'):
-            return self._get_next_dataset_image()
-        else:
-            raise ValueError(f"Fuente de entrada no válida: {self.input_source}")
-    
-    def _get_webcam_frame(self) -> np.ndarray:
-        """Captura y devuelve un frame de la webcam o una imagen de prueba."""
-        if hasattr(self, 'use_test_image') and self.use_test_image:
-            # Devolver imagen de prueba si la webcam no está disponible
-            frame = self.test_image.copy()
-        else:
-            # Intentar capturar frame de la webcam
-            try:
-                ret, frame = self.webcam.read()
-                if not ret:
-                    print("No se pudo capturar frame de la webcam, usando imagen de prueba")
-                    # Crear una imagen de prueba
-                    frame = np.random.random((self.target_size[1], self.target_size[0], 3))
-                    frame = (frame * 255).astype(np.uint8)
-                else:
-                    # Convertir de BGR a RGB
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
-                    # Redimensionar
-                    frame = cv2.resize(frame, self.target_size)
-            except Exception as e:
-                print(f"Error al capturar frame: {e}")
-                # Crear una imagen de prueba
-                frame = np.random.random((self.target_size[1], self.target_size[0], 3))
-                frame = (frame * 255).astype(np.uint8)
-        
-        # Aplicar preprocesamiento si está definido
-        if self.preprocessing_function:
-            frame = self.preprocessing_function(frame)
-        
-        return frame
-    
-    def _get_next_file_image(self) -> np.ndarray:
-        """Obtiene la siguiente imagen de la lista de archivos."""
-        if not self.image_paths:
-            raise ValueError("No hay imágenes disponibles")
-        
-        # Avanzar al siguiente índice
-        next_index = (self.current_index + 1) % len(self.image_paths)
-        self._load_image_at_index(next_index)
-        
-        # Aplicar preprocesamiento si está definido
-        if self.preprocessing_function:
-            self.current_image = self.preprocessing_function(self.current_image)
-        
-        return self.current_image
-    
-    def _get_next_dataset_image(self) -> np.ndarray:
-        """Obtiene la siguiente imagen del dataset."""
-        if not self.images:
-            raise ValueError("No hay imágenes disponibles en el dataset")
-        
-        # Avanzar al siguiente índice
-        next_index = (self.current_index + 1) % len(self.images)
-        self.current_index = next_index
-        
-        # Obtener imagen
-        img = self.images[self.current_index]
-        
-        # Redimensionar si es necesario
-        if img.shape[:2] != self.target_size:
-            img = cv2.resize(img, self.target_size)
-        
-        # Aplicar preprocesamiento si está definido
-        if self.preprocessing_function:
-            img = self.preprocessing_function(img)
-        
-        return img
-    
+        """Obtiene la siguiente imagen de la fuente, ya preprocesada."""
+        if self.is_live:
+            return self._finalize(self._capture_frame())
+        return self.get_specific_image((self.current_index + 1) % max(len(self), 1))
+
     def get_previous_image(self) -> np.ndarray:
-        """
-        Obtiene la imagen anterior (solo para fuentes basadas en archivos o datasets).
-        
-        Returns:
-            Imagen como array numpy
-        """
-        if self.input_source == 'webcam':
-            return self._get_webcam_frame()
-        elif self.input_source.startswith('directory:') or self.input_source.startswith('file:'):
-            # Retroceder al índice anterior
-            prev_index = (self.current_index - 1) % len(self.image_paths)
-            self._load_image_at_index(prev_index)
-            
-            # Aplicar preprocesamiento si está definido
-            if self.preprocessing_function:
-                self.current_image = self.preprocessing_function(self.current_image)
-            
-            return self.current_image
-        elif self.input_source.startswith('dataset:'):
-            # Retroceder al índice anterior
-            prev_index = (self.current_index - 1) % len(self.images)
-            self.current_index = prev_index
-            
-            # Obtener imagen
-            img = self.images[self.current_index]
-            
-            # Redimensionar si es necesario
-            if img.shape[:2] != self.target_size:
-                img = cv2.resize(img, self.target_size)
-            
-            # Aplicar preprocesamiento si está definido
-            if self.preprocessing_function:
-                img = self.preprocessing_function(img)
-            
-            return img
-    
+        """Obtiene la imagen anterior, ya preprocesada."""
+        if self.is_live:
+            return self._finalize(self._capture_frame())
+        return self.get_specific_image((self.current_index - 1) % max(len(self), 1))
+
+    def get_current_image(self) -> np.ndarray:
+        """Obtiene de nuevo la imagen actual sin avanzar el índice."""
+        if self.is_live:
+            return self._finalize(self._capture_frame())
+        return self.get_specific_image(self.current_index)
+
     def get_specific_image(self, index: int) -> np.ndarray:
         """
-        Obtiene una imagen específica por índice.
-        
+        Obtiene una imagen concreta por índice.
+
         Args:
             index: Índice de la imagen
-            
+
         Returns:
-            Imagen como array numpy
+            Imagen preprocesada
         """
-        if self.input_source == 'webcam':
-            return self._get_webcam_frame()
-        elif self.input_source.startswith('directory:') or self.input_source.startswith('file:'):
-            if 0 <= index < len(self.image_paths):
-                self._load_image_at_index(index)
-                
-                # Aplicar preprocesamiento si está definido
-                if self.preprocessing_function:
-                    self.current_image = self.preprocessing_function(self.current_image)
-                
-                return self.current_image
-            else:
-                raise IndexError(f"Índice {index} fuera de rango")
-        elif self.input_source.startswith('dataset:'):
-            if 0 <= index < len(self.images):
-                self.current_index = index
-                
-                # Obtener imagen
-                img = self.images[index]
-                
-                # Redimensionar si es necesario
-                if img.shape[:2] != self.target_size:
-                    img = cv2.resize(img, self.target_size)
-                
-                # Aplicar preprocesamiento si está definido
-                if self.preprocessing_function:
-                    img = self.preprocessing_function(img)
-                
-                return img
-            else:
-                raise IndexError(f"Índice {index} fuera de rango")
-    
-    def close(self):
-        """Libera recursos."""
+        if self.is_live:
+            return self._finalize(self._capture_frame())
+
+        total = len(self)
+        if total == 0:
+            raise ValueError("No hay imágenes disponibles en la fuente de entrada")
+        if not 0 <= index < total:
+            raise IndexError(f"Índice {index} fuera de rango (0-{total - 1})")
+
+        self.current_index = index
+
+        if self.image_paths:
+            raw = self._read_image_file(self.image_paths[index])
+        else:
+            raw = self._resize(np.asarray(self.images[index]))
+
+        return self._finalize(raw)
+
+    def _read_image_file(self, path: str) -> np.ndarray:
+        """Lee una imagen de disco como RGB con el tamaño objetivo."""
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError(f"No se pudo cargar la imagen {path}")
+        return self._resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+
+    def _capture_frame(self) -> np.ndarray:
+        """Captura un frame de la webcam, con reserva sintética si falla."""
+        try:
+            ok, frame = self.webcam.read()
+        except cv2.error as error:
+            print(f"Error al capturar frame: {error}")
+            ok, frame = False, None
+
+        if not ok or frame is None:
+            print("No se pudo capturar un frame de la webcam, usando imagen sintética")
+            return self._synthetic_images(1)[0]
+
+        return self._resize(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+    def _resize(self, img: np.ndarray) -> np.ndarray:
+        """Redimensiona al tamaño objetivo `(ancho, alto)` si hace falta."""
+        width, height = self.target_size
+        if img.shape[1] == width and img.shape[0] == height:
+            return img
+        return cv2.resize(img, (width, height), interpolation=cv2.INTER_AREA)
+
+    def _finalize(self, raw: np.ndarray) -> np.ndarray:
+        """Guarda la imagen original y devuelve la versión preprocesada."""
+        self.current_raw_image = raw
+        if self.preprocessing_function is None:
+            return raw
+        # Se preprocesa una copia para que `current_raw_image` no se altere y para
+        # que reprocesar la misma imagen no acumule transformaciones.
+        return self.preprocessing_function(np.array(raw, dtype=np.float32, copy=True))
+
+    # ------------------------------------------------------------------
+    # Ciclo de vida
+    # ------------------------------------------------------------------
+    def close(self) -> None:
+        """Libera los recursos asociados a la fuente."""
         if self.webcam is not None:
             self.webcam.release()
+            self.webcam = None
+
+    def __enter__(self) -> InputFetcher:
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
