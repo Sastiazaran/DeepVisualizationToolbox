@@ -35,11 +35,13 @@ def synthetic_image(size: int = 224) -> np.ndarray:
     """
     y, x = np.mgrid[0:size, 0:size].astype(np.float32)
 
-    stripes = 0.5 + 0.5 * np.sin(x / 6.0)
-    rings = 0.5 + 0.5 * np.cos(np.hypot(x - size / 2, y - size / 2) / 8.0)
+    stripes = 0.5 + 0.5 * np.sin(x / 9.0)
+    rings = 0.5 + 0.5 * np.cos(np.hypot(x - size / 2, y - size / 2) / 11.0)
     square = ((np.abs(x - size * 0.3) < 30) & (np.abs(y - size * 0.7) < 30)).astype(np.float32)
 
-    image = np.stack([stripes, rings, np.clip(stripes * 0.4 + square, 0, 1)], axis=-1)
+    luminance = np.clip(0.45 * stripes + 0.35 * rings + 0.2 * square, 0, 1)
+    # Una imagen casi acromática evita que el color domine sobre la estructura.
+    image = np.stack([luminance, luminance * 0.97, luminance * 0.92], axis=-1)
     return (image * 255).astype(np.uint8)
 
 
@@ -51,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--layer', type=str, default='block3_conv1', help='Capa a visualizar')
     parser.add_argument('--n-filters', type=int, default=64,
                         help='Número de filtros a dibujar en la cuadrícula')
+    parser.add_argument('--output', type=str, default='activations_grid.png',
+                        help='Nombre del archivo generado dentro de docs/images')
     return parser.parse_args()
 
 
@@ -86,7 +90,7 @@ def main() -> None:
         ax.imshow(normalize_01(activations[:, :, i]), cmap='viridis')
         ax.axis('off')
 
-    output_path = os.path.join(OUTPUT_DIR, 'main_screen.png')
+    output_path = os.path.join(OUTPUT_DIR, args.output)
     fig.savefig(output_path, dpi=150, bbox_inches='tight')
     print(f"Imagen de ejemplo generada en {output_path}")
 
