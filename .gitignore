@@ -116,3 +116,6 @@ models/*.h5
 
 # Imágenes de prueba generadas automáticamente
 input_images/
+
+# macOS
+.DS_Store
